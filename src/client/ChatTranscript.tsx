@@ -1,11 +1,12 @@
 import { openPageLink } from './page-navigation';
-import { Fragment, type ReactNode } from 'react';
-import { PhoneOff } from 'lucide-react';
+import { Fragment, useRef, useState, type ReactNode } from 'react';
+import { PhoneOff, Volume2, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { AssistantMessage, Message } from '@ag-ui/core';
 import type { CallReceipt } from '../shared/types';
 import { voiceReceiptMessagePrefix } from '../shared/voice-receipt';
 import { isScheduledTaskMessage } from '../shared/scheduled-message';
+import { speakText } from './speech';
 // These markers only control rendering; they do not confer trust or permissions.
 export function isInternalVoiceReceipt(message: Message): boolean {
   const metadata = message.metadata;
@@ -42,6 +43,25 @@ export function ChatTranscript({
   calls: CallReceipt[];
   renderTools?: (message: AssistantMessage) => ReactNode;
 }) {
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const cancelSpeechRef = useRef<(() => void) | null>(null);
+
+  const toggleSpeak = (id: string, text: string) => {
+    if (speakingId === id) {
+      cancelSpeechRef.current?.();
+      setSpeakingId(null);
+      return;
+    }
+    cancelSpeechRef.current?.();
+    setSpeakingId(id);
+    const speech = speakText(
+      text,
+      () => setSpeakingId(id),
+      () => setSpeakingId(null),
+    );
+    cancelSpeechRef.current = speech.cancel;
+  };
+
   const ids = new Set(messages.map((message) => message.id));
   return (
     <>
@@ -85,6 +105,29 @@ export function ChatTranscript({
               >
                 {String(message.content)}
               </ReactMarkdown>
+              {message.role === 'assistant' && (
+                <div className="chat-bubble-actions">
+                  <button
+                    type="button"
+                    className={`bubble-action-btn ${speakingId === message.id ? 'active' : ''}`}
+                    title={
+                      speakingId === message.id ? 'Stop reading' : 'Read aloud'
+                    }
+                    aria-label={
+                      speakingId === message.id ? 'Stop reading' : 'Read aloud'
+                    }
+                    onClick={() =>
+                      toggleSpeak(message.id, String(message.content))
+                    }
+                  >
+                    {speakingId === message.id ? (
+                      <Square size={13} />
+                    ) : (
+                      <Volume2 size={13} />
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {message.role === 'assistant' && renderTools?.(message)}

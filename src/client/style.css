@@ -4280,3 +4280,47 @@ h3 {
   overflow-wrap: anywhere;
   font-size: 11px;
 }
+
+.chat-bubble-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 6px;
+  padding-top: 4px;
+}
+
+.bubble-action-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #888;
+  padding: 4px 6px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.bubble-action-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #222;
+}
+
+.bubble-action-btn.active {
+  color: #e53e3e;
+  background: rgba(229, 62, 62, 0.1);
+  animation: pulse-read 1.2s infinite;
+}
+
+@keyframes pulse-read {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+button.icon-button.on-call {
+  color: #e53e3e;
+  background: rgba(229, 62, 62, 0.1);
+  border-color: rgba(229, 62, 62, 0.3);
+}
+

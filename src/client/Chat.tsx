@@ -8,7 +8,7 @@ import { ConnectionActionCard } from './ConnectionActionCard';
 import { contextualMessage, type PageContext } from './page-context';
 import { api } from './api';
 import type { Page } from '../server/pages';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CopilotKitCoreErrorCode } from '@copilotkit/core';
 import {
   CopilotChatToolCallsView,
@@ -22,11 +22,14 @@ import {
   ArrowUp,
   Clock3,
   Link2,
+  Mic,
+  MicOff,
   Phone,
   PhoneOff,
   Square,
   X,
 } from 'lucide-react';
+import { getSpeechRecognition } from './speech';
 import {
   ComputerToolCard,
   type ComputerToolRenderProps,
@@ -102,7 +105,100 @@ export function Chat({
   const chatError = error || runError;
   const [loaded, setLoaded] = useState(false);
   const [running, setRunning] = useState(false);
-  const voice = useVoice(thread.id, onSaved, agent.messages.at(-1)?.id);
+  const onVoiceTurn = useCallback(
+    async (text: string): Promise<string> => {
+      if (!text.trim() || running || !loaded || !contextReady || paused)
+        return '';
+      setError('');
+      setRunError('');
+      setRunning(true);
+      agent.addMessage({
+        id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
+        role: 'user',
+        content: contextualMessage(text, pageContext),
+      });
+      try {
+        const result = await copilotkit.runAgent({ agent });
+        onSaved();
+        const assistantMsg = result.newMessages.findLast(
+          (m) =>
+            m.role === 'assistant' &&
+            typeof m.content === 'string' &&
+            m.content.trim(),
+        );
+        const reply =
+          typeof assistantMsg?.content === 'string'
+            ? assistantMsg.content
+            : 'I have finished thinking about that.';
+        return reply;
+      } finally {
+        setRunning(false);
+      }
+    },
+    [
+      agent,
+      copilotkit,
+      contextReady,
+      loaded,
+      onSaved,
+      pageContext,
+      paused,
+      running,
+    ],
+  );
+
+  const voice = useVoice(
+    thread.id,
+    onSaved,
+    agent.messages.at(-1)?.id,
+    onVoiceTurn,
+  );
+
+  const [isDictating, setIsDictating] = useState(false);
+  const dictationRef = useRef<any>(null);
+
+  const toggleDictation = () => {
+    const SpeechRecognition = getSpeechRecognition();
+    if (!SpeechRecognition) {
+      setError(
+        'Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.',
+      );
+      return;
+    }
+    if (isDictating) {
+      try {
+        dictationRef.current?.stop();
+      } catch {}
+      setIsDictating(false);
+      return;
+    }
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || 'en-US';
+      recognition.onresult = (event: any) => {
+        let words = '';
+        for (let i = 0; i < event.results.length; i++) {
+          words += event.results[i][0].transcript;
+        }
+        if (words) {
+          setDraft((prev) => (prev ? `${prev} ${words}` : words));
+        }
+      };
+      recognition.onend = () => {
+        setIsDictating(false);
+      };
+      recognition.onerror = () => {
+        setIsDictating(false);
+      };
+      recognition.start();
+      dictationRef.current = recognition;
+      setIsDictating(true);
+    } catch {
+      setIsDictating(false);
+    }
+  };
   const sent = useRef(false);
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -318,11 +414,11 @@ export function Chat({
               voice.status === 'idle' ? 'Start voice call' : 'End voice call'
             }
             title={
-              voiceReady
+              voice.status === 'idle'
                 ? 'Talk with your Dot'
-                : 'Voice setup requires VOICE_API_KEY and VOICE_MODEL'
+                : 'End voice call'
             }
-            disabled={!voiceReady || paused || !loaded || !contextReady}
+            disabled={paused || !loaded || !contextReady}
             onClick={() =>
               voice.status === 'idle' ? void voice.start() : void voice.end()
             }
@@ -444,6 +540,20 @@ export function Chat({
             onClick={() => setSourceOpen(!sourceOpen)}
           >
             <Link2 size={19} />
+          </button>
+          <button
+            type="button"
+            className={`icon-button ${isDictating ? 'on-call' : ''}`}
+            aria-label={isDictating ? 'Stop voice typing' : 'Voice typing'}
+            title={
+              isDictating
+                ? 'Listening… click to stop'
+                : 'Voice typing (dictate your message)'
+            }
+            onClick={toggleDictation}
+            disabled={running || paused || !loaded || !contextReady}
+          >
+            {isDictating ? <MicOff size={19} /> : <Mic size={19} />}
           </button>
           <textarea
             aria-label="Message your Dot"
