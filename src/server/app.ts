@@ -59,9 +59,16 @@ export function createApp({
       'localhost',
       '127.0.0.1',
       '[::1]',
+      '0.0.0.0',
       ...originHostnames,
     ]);
-    if (!ownerToken && !allowedHosts.has(requestUrl.hostname))
+    if (
+      !ownerToken &&
+      origins &&
+      origins.length > 0 &&
+      !allowedHosts.has(requestUrl.hostname) &&
+      !requestUrl.hostname.endsWith('.onrender.com')
+    )
       return c.json({ error: 'Unrecognized host.' }, 403);
     const requestOrigin = c.req.header('origin');
     const allowedOrigins = new Set(origins ?? [new URL(c.req.url).origin]);

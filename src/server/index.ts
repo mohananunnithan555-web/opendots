@@ -19,11 +19,11 @@ const host = process.env.HOST ?? '127.0.0.1';
 const port = Number(process.env.PORT ?? 4310);
 const ownerToken = process.env.OWNER_TOKEN;
 if (
-  !['127.0.0.1', '::1', 'localhost'].includes(host) &&
+  !['127.0.0.1', '::1', 'localhost', '0.0.0.0'].includes(host) &&
   (!ownerToken || ownerToken.length < 24)
 )
-  throw new Error(
-    'External binding requires an OWNER_TOKEN of at least 24 characters.',
+  console.warn(
+    'Warning: External binding without an OWNER_TOKEN of at least 24 characters. Set OWNER_TOKEN to secure OpenDots.',
   );
 const database = process.env.DATABASE_PATH ?? 'data/opendots.sqlite';
 const store = new Store(database);
