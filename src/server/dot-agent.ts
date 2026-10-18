@@ -29,6 +29,7 @@ import {
 } from './platform-config.js';
 import { browserResponse } from './research.js';
 import { answerObserver, type SetupTelemetry } from './setup-telemetry.js';
+import { createThoughtSignatureFetch } from './thought-signature.js';
 const channelError = () => ({
   type: EventType.RUN_ERROR,
   message:
@@ -334,6 +335,7 @@ export class DotAgent extends AbstractAgent {
           baseURL: this.config.baseUrl ?? 'https://api.openai.com/v1',
           api: 'chat-completions',
           maxRetries: 1,
+          fetch: createThoughtSignatureFetch(),
         });
         const start = async () => {
           const appTools =
