@@ -210,20 +210,19 @@ export class Platform {
     let finalRequest = request;
     const reqUrl = new URL(request.url);
     const agentParam = reqUrl.searchParams.get('agentId');
+    const defaultDotId = this.workspace.dots()[0]?.id;
     if (agentParam?.startsWith('chat-')) {
-      const thread = this.workspace.conversations().find((t) => t.id === agentParam.slice(5));
-      if (thread) {
-        reqUrl.searchParams.set('agentId', thread.dotId);
-        finalRequest = new Request(reqUrl.toString(), request);
-      }
+      const threadId = agentParam.slice(5);
+      const thread = this.workspace.requireThread(threadId, defaultDotId);
+      reqUrl.searchParams.set('agentId', thread.dotId);
+      finalRequest = new Request(reqUrl.toString(), request);
     }
     const match = reqUrl.pathname.match(/\/agent\/chat-([^/]+)(\/.*)?$/);
     if (match) {
-      const thread = this.workspace.conversations().find((t) => t.id === match[1]);
-      if (thread) {
-        reqUrl.pathname = reqUrl.pathname.replace(`/agent/chat-${match[1]}`, `/agent/${thread.dotId}`);
-        finalRequest = new Request(reqUrl.toString(), request);
-      }
+      const threadId = match[1];
+      const thread = this.workspace.requireThread(threadId, defaultDotId);
+      reqUrl.pathname = reqUrl.pathname.replace(`/agent/chat-${match[1]}`, `/agent/${thread.dotId}`);
+      finalRequest = new Request(reqUrl.toString(), request);
     }
     const response = await this.handler.fetch(finalRequest);
     return response;

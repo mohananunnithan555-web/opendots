@@ -79,10 +79,12 @@ export function validateRuntimeScope(
     if (val.startsWith('chat-')) {
       const thread = workspace.conversations().find((t) => t.id === val.slice(5));
       if (thread) return workspace.dot(thread.dotId);
+      return workspace.dots()[0];
     }
     return (
       workspace.dot(val) ||
-      workspace.dots().find((d) => d.name === val)
+      workspace.dots().find((d) => d.name === val) ||
+      workspace.dots()[0]
     );
   };
   for (const candidate of [agentId, bodyAgent, queryAgent]) {

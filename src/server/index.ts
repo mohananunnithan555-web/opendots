@@ -38,7 +38,7 @@ const config: PlatformConfig = {
   intelligenceApiUrl: process.env.INTELLIGENCE_API_URL || undefined,
   intelligenceWsUrl: intelligenceWsUrlFromEnv(process.env),
   apiKey: process.env.OPENAI_API_KEY,
-  model: process.env.OPENAI_MODEL,
+  model: process.env.OPENAI_MODEL || 'gemini-3.8-flash',
   baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
   agentRunTimeoutMs: agentRunTimeoutMsFromEnv(process.env),
   webSearchProvider: webSearchProvider(process.env.WEB_SEARCH_PROVIDER),
