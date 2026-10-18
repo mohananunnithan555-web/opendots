@@ -49,7 +49,7 @@ services:
     profiles: [browser]
     build:
       context: .
-      target: browser
+      dockerfile: Dockerfile.browser
     environment:
       BROWSER_SECRET: ${BROWSER_SECRET:-}
     networks:

@@ -15,7 +15,9 @@ import {
   intelligenceWsUrlFromEnv,
   type PlatformConfig,
 } from './platform-config.js';
-const host = process.env.HOST ?? '127.0.0.1';
+const host =
+  process.env.HOST ??
+  (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
 const port = Number(process.env.PORT ?? 4310);
 const ownerToken = process.env.OWNER_TOKEN;
 if (
