@@ -104,7 +104,6 @@ export class DotAgent extends AbstractAgent {
         const dot = this.workspace.dot(this.dotId);
         if (!dot) throw new Error('Specialist Dot not found.');
         if (
-          this.channel &&
           !this.workspace
             .conversations()
             .some((thread) => thread.id === input.threadId)
@@ -112,7 +111,7 @@ export class DotAgent extends AbstractAgent {
           this.workspace.bindThread(
             input.threadId,
             dot.id,
-            'Slack conversation',
+            this.channel ? 'Slack conversation' : 'A new thought',
           );
         const conversation = this.workspace.requireThread(
           input.threadId,

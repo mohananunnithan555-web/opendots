@@ -292,8 +292,18 @@ export class WorkspaceStore {
     return value;
   }
   requireThread(id: string, dotId?: string): Conversation {
-    const thread = this.conversations().find((thread) => thread.id === id);
-    if (!thread || (dotId && thread.dotId !== dotId))
+    let thread = this.conversations().find((t) => t.id === id);
+    if (!thread && dotId) {
+      return this.bindThread(id, dotId, 'A new thought');
+    }
+    if (thread && dotId && thread.dotId !== dotId) {
+      this.db
+        .prepare('UPDATE thread_bindings SET dotId = ? WHERE id = ?')
+        .run(dotId, id);
+      thread.dotId = dotId;
+      return thread;
+    }
+    if (!thread)
       throw new Error('Conversation does not belong to this Dot and owner.');
     return thread;
   }
