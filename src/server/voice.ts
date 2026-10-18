@@ -120,10 +120,19 @@ export class VoiceService {
           redirect: 'error',
         },
       );
-      if (!response.ok)
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        let detail = '';
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed?.error?.message) detail = `: ${parsed.error.message}`;
+        } catch {
+          if (errorText) detail = `: ${errorText.slice(0, 200)}`;
+        }
         throw new Error(
-          `Voice provider returned HTTP ${response.status}. Check voice configuration and quota.`,
+          `Voice provider returned HTTP ${response.status}${detail}. Check voice configuration and quota.`,
         );
+      }
       const location = response.headers.get('location');
       const providerId = location
         ? new URL(location, 'https://api.openai.com').pathname.match(
