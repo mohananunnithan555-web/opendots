@@ -71,8 +71,44 @@ export function createApp({
     )
       return c.json({ error: 'Unrecognized host.' }, 403);
     const requestOrigin = c.req.header('origin');
-    const allowedOrigins = new Set(origins ?? [new URL(c.req.url).origin]);
-    if (requestOrigin && !allowedOrigins.has(requestOrigin))
+    const forwardedProto =
+      c.req.header('x-forwarded-proto') ??
+      (c.req.url.startsWith('https') ? 'https' : 'http');
+    const forwardedHost =
+      c.req.header('x-forwarded-host') ??
+      c.req.header('host') ??
+      requestUrl.host;
+    const currentOrigin = `${forwardedProto}://${forwardedHost}`;
+    const allowedOrigins = new Set([
+      ...(origins ?? []),
+      currentOrigin,
+      new URL(c.req.url).origin,
+      `https://${forwardedHost}`,
+      `http://${forwardedHost}`,
+    ]);
+
+    let isAllowedOrigin = false;
+    if (!requestOrigin) {
+      isAllowedOrigin = true;
+    } else if (allowedOrigins.has(requestOrigin)) {
+      isAllowedOrigin = true;
+    } else {
+      try {
+        const originUrl = new URL(requestOrigin);
+        const hostOnly = forwardedHost.split(':')[0];
+        if (
+          originUrl.hostname === hostOnly ||
+          originUrl.hostname.endsWith('.onrender.com') ||
+          originUrl.hostname === 'localhost' ||
+          originUrl.hostname === '127.0.0.1' ||
+          originHostnames.includes(originUrl.hostname)
+        ) {
+          isAllowedOrigin = true;
+        }
+      } catch {}
+    }
+
+    if (!isAllowedOrigin)
       return c.json({ error: 'Cross-origin requests are not allowed.' }, 403);
     if (c.req.header('sec-fetch-site') === 'cross-site')
       return c.json({ error: 'Cross-site requests are not allowed.' }, 403);
