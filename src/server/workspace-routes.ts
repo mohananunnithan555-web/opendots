@@ -223,6 +223,69 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     platform.workspace.anchorCall(c.req.param('id'), data.data.anchorMessageId);
     return c.json(await voice.end(c.req.param('id'), data.data.transcript));
   });
+  app.post('/voice/speak', async (c) => {
+    const data = z
+      .object({
+        text: z.string().min(1).max(3000),
+        voice: z.string().optional(),
+      })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!data.success) {
+      return c.json({ error: 'Text is required (max 3000 chars).' }, 400);
+    }
+
+    const apiKey = platform.config.apiKey;
+    if (!apiKey) {
+      return c.json({ error: 'No API key configured.' }, 500);
+    }
+
+    const voiceName = data.data.voice || platform.config.voiceName || 'Aoede';
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: data.data.text }] }],
+            generationConfig: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName }
+                }
+              }
+            }
+          }),
+          signal: AbortSignal.timeout(15000),
+        }
+      );
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        return c.json(
+          { error: `Gemini TTS returned HTTP ${response.status}: ${errText}` },
+          response.status as any,
+        );
+      }
+
+      const json: any = await response.json();
+      const inlineData = json?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+      if (!inlineData?.data) {
+        return c.json({ error: 'No audio returned from Gemini.' }, 500);
+      }
+
+      return c.json({
+        audio: inlineData.data,
+        mimeType: inlineData.mimeType || 'audio/wav',
+      });
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : 'Speech synthesis failed' },
+        500,
+      );
+    }
+  });
   app.all('/copilotkit/*', (c) => platform.handle(c.req.raw));
   app.onError((error, c) => {
     const text = error.message;

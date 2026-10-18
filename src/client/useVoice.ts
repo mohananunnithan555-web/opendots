@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, authHeaders } from './api';
-import { getSpeechRecognition, speakText } from './speech';
+import { getSpeechRecognition, speakWithGemini, speakText } from './speech';
 
 // A single failed control poll is usually a network flap, not a dead call.
 const CONTROL_POLL_FAILURE_LIMIT = 3;
@@ -286,7 +286,7 @@ export function useVoice(
           setCaption(reply);
           setPhase('speaking');
 
-          const speech = speakText(
+          const speech = await speakWithGemini(
             reply,
             () => {
               if (!current.cancelled) setPhase('speaking');

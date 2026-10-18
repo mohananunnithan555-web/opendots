@@ -6,7 +6,7 @@ import type { AssistantMessage, Message } from '@ag-ui/core';
 import type { CallReceipt } from '../shared/types';
 import { voiceReceiptMessagePrefix } from '../shared/voice-receipt';
 import { isScheduledTaskMessage } from '../shared/scheduled-message';
-import { speakText } from './speech';
+import { speakWithGemini } from './speech';
 // These markers only control rendering; they do not confer trust or permissions.
 export function isInternalVoiceReceipt(message: Message): boolean {
   const metadata = message.metadata;
@@ -46,7 +46,7 @@ export function ChatTranscript({
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const cancelSpeechRef = useRef<(() => void) | null>(null);
 
-  const toggleSpeak = (id: string, text: string) => {
+  const toggleSpeak = async (id: string, text: string) => {
     if (speakingId === id) {
       cancelSpeechRef.current?.();
       setSpeakingId(null);
@@ -54,7 +54,7 @@ export function ChatTranscript({
     }
     cancelSpeechRef.current?.();
     setSpeakingId(id);
-    const speech = speakText(
+    const speech = await speakWithGemini(
       text,
       () => setSpeakingId(id),
       () => setSpeakingId(null),

@@ -1,4 +1,6 @@
-// Browser Speech API helpers for Speech-to-Text and Text-to-Speech
+// Browser Speech & Gemini Neural TTS helpers
+
+import { api } from './api';
 
 export function getSpeechRecognition(): any {
   if (typeof window === 'undefined') return null;
@@ -23,6 +25,55 @@ export function cleanForSpeech(text: string): string {
     .replace(/https?:\/\/\S+/g, '')
     .replace(/\n+/g, ' ')
     .trim();
+}
+
+/**
+ * High-quality Google Gemini Neural Speech (Aoede / Puck / Kore).
+ * Falls back seamlessly to browser speech if offline or rate-limited.
+ */
+export async function speakWithGemini(
+  text: string,
+  onStart?: () => void,
+  onEnd?: () => void,
+): Promise<{ cancel: () => void }> {
+  const cleaned = cleanForSpeech(text);
+  if (!cleaned) {
+    onEnd?.();
+    return { cancel: () => {} };
+  }
+
+  // Cancel any ongoing browser speech synthesis first
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+
+  try {
+    const res = await api<{ audio: string; mimeType: string }>(
+      '/voice/speak',
+      'POST',
+      { text: cleaned.slice(0, 2500) },
+    );
+
+    if (res?.audio) {
+      const audio = new Audio(
+        `data:${res.mimeType || 'audio/wav'};base64,${res.audio}`,
+      );
+      audio.onplay = () => onStart?.();
+      audio.onended = () => onEnd?.();
+      audio.onerror = () => onEnd?.();
+      void audio.play();
+      return {
+        cancel: () => {
+          audio.pause();
+          audio.currentTime = 0;
+        },
+      };
+    }
+    throw new Error('No audio returned');
+  } catch {
+    // Graceful fallback to browser speech synthesis
+    return speakText(text, onStart, onEnd);
+  }
 }
 
 export function speakText(
@@ -70,7 +121,6 @@ export function speakText(
 
   utterance.onstart = () => {
     onStart?.();
-    // Chrome bug workaround: speech synthesis can pause if text takes >15s
     intervalId = setInterval(() => {
       if (window.speechSynthesis.speaking) {
         window.speechSynthesis.resume();
