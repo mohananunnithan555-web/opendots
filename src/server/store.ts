@@ -20,7 +20,7 @@ const defaults: Settings = {
   paused: false,
   researchAllowed: true,
   memoryAllowed: true,
-  appsAllowed: false,
+  appsAllowed: true,
 };
 export class Store {
   private db: DatabaseSync;

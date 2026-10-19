@@ -75,9 +75,21 @@ export class WorkspaceStore {
       this.createDot(
         space.id,
         'Dot',
-        'Be thoughtful, practical, and concise. Help the user think clearly and follow through.',
+        "Be thoughtful, practical, and concise. Help the user think clearly and follow through. You have access to the user's connected apps (Gmail, Google Calendar, Google Drive, Instagram, Telegram, WhatsApp) via Composio tools. When asked to check emails, calendar, or messages, use your tools or provide the connection link if authorization is needed.",
         true,
         true,
+        [space.id],
+        null,
+        false,
+        true,
+        [
+          'gmail',
+          'googlecalendar',
+          'googledrive',
+          'instagram',
+          'telegram',
+          'whatsapp',
+        ],
       );
     }
   }
