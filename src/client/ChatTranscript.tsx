@@ -83,7 +83,22 @@ export function ChatTranscript({
               )}
               <ReactMarkdown
                 components={{
-                  img: ({ alt }) => <span>{alt}</span>,
+                  img: ({ src, alt }) => (
+                    <img
+                      src={src}
+                      alt={alt ?? 'Generated image'}
+                      className="chat-image"
+                      loading="lazy"
+                      style={{
+                        maxWidth: '100%',
+                        borderRadius: '12px',
+                        marginTop: '8px',
+                        marginBottom: '8px',
+                        display: 'block',
+                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.12)',
+                      }}
+                    />
+                  ),
                   a: ({ href, children }) => (
                     <a
                       onClick={(event) => {
