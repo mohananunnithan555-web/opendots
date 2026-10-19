@@ -5,9 +5,9 @@ const FALLBACK_MODELS = [
   'gemini-3.7-flash',
 ];
 
-export function createThoughtSignatureFetch(): typeof fetch {
-  const toolSignatures = new Map<string, string>();
+const toolSignatures = new Map<string, string>();
 
+export function createThoughtSignatureFetch(): typeof fetch {
   return async (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -42,6 +42,43 @@ export function createThoughtSignatureFetch(): typeof fetch {
     }
 
     let res = await fetch(input, init);
+
+    // If 400 Bad Request (commonly due to invalid/missing thought_signature in multi-turn tool history),
+    // sanitize prior tool_calls into plain conversational messages and retry seamlessly
+    if (res.status === 400 && parsedBody && Array.isArray(parsedBody.messages) && init) {
+      try {
+        let converted = false;
+        const sanitizedMessages = (parsedBody.messages as Array<Record<string, unknown>>).map((msg) => {
+          if (msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+            converted = true;
+            const toolSummary = (msg.tool_calls as Array<Record<string, any>>)
+              .map((tc) => `[Executed tool: ${tc.function?.name ?? 'action'}]`)
+              .join('\n');
+            const newMsg = { ...msg };
+            newMsg.content = (typeof msg.content === 'string' && msg.content ? msg.content + '\n' : '') + toolSummary;
+            delete newMsg.tool_calls;
+            return newMsg;
+          }
+          if (msg.role === 'tool') {
+            converted = true;
+            return {
+              role: 'user',
+              content: `[Tool result]: ${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)}`,
+            };
+          }
+          return msg;
+        });
+
+        if (converted) {
+          parsedBody.messages = sanitizedMessages;
+          init.body = JSON.stringify(parsedBody);
+          const retryRes = await fetch(input, init);
+          if (retryRes.status === 200) {
+            res = retryRes;
+          }
+        }
+      } catch {}
+    }
 
     // If rate-limited (429), server overloaded (503), or retired model (404), try fallback models
     if (
