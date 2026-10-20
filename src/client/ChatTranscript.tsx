@@ -34,7 +34,85 @@ function Receipt({ call }: { call: CallReceipt }) {
     </div>
   );
 }
+function ChatVideo({ src, title }: { src: string; title?: string }) {
+  return (
+    <div
+      className="chat-video-block"
+      style={{
+        marginTop: '8px',
+        marginBottom: '8px',
+        maxWidth: '100%',
+        width: '460px',
+        display: 'block',
+      }}
+    >
+      <video
+        src={src}
+        controls
+        playsInline
+        preload="metadata"
+        style={{
+          width: '100%',
+          maxHeight: '340px',
+          borderRadius: '12px',
+          display: 'block',
+          backgroundColor: '#0a0a0a',
+          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.25)',
+        }}
+      >
+        Your browser does not support playing this video.
+      </video>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          marginTop: '6px',
+          fontSize: '11px',
+          opacity: 0.85,
+        }}
+      >
+        <span
+          style={{
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            maxWidth: '75%',
+          }}
+        >
+          {title && !title.startsWith('http') ? title : '🎬 AI Generated Video'}
+        </span>
+        <a
+          href={src}
+          target="_blank"
+          rel="noreferrer"
+          download
+          style={{
+            fontSize: '11px',
+            color: 'inherit',
+            textDecoration: 'underline',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '3px',
+          }}
+        >
+          <ExternalLink size={11} />
+          Download / Open
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function ChatImage({ src, alt }: { src?: string; alt?: string }) {
+  if (
+    src &&
+    (src.endsWith('.mp4') || src.endsWith('.webm') || src.includes('/video/'))
+  ) {
+    return <ChatVideo src={src} title={alt} />;
+  }
+
   const [currentSrc, setCurrentSrc] = useState(src);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -186,23 +264,33 @@ export function ChatTranscript({
               <ReactMarkdown
                 components={{
                   img: ({ src, alt }) => <ChatImage src={src} alt={alt} />,
-                  a: ({ href, children }) => (
-                    <a
-                      onClick={(event) => {
-                        if (href?.startsWith('/#/spaces/')) {
-                          event.preventDefault();
-                          openPageLink(href);
+                  a: ({ href, children }) => {
+                    if (
+                      href &&
+                      (href.endsWith('.mp4') ||
+                        href.endsWith('.webm') ||
+                        href.includes('/video/'))
+                    ) {
+                      return <ChatVideo src={href} title={String(children)} />;
+                    }
+                    return (
+                      <a
+                        onClick={(event) => {
+                          if (href?.startsWith('/#/spaces/')) {
+                            event.preventDefault();
+                            openPageLink(href);
+                          }
+                        }}
+                        href={href}
+                        target={
+                          href?.startsWith('/#/spaces/') ? undefined : '_blank'
                         }
-                      }}
-                      href={href}
-                      target={
-                        href?.startsWith('/#/spaces/') ? undefined : '_blank'
-                      }
-                      rel="noreferrer"
-                    >
-                      {children}
-                    </a>
-                  ),
+                        rel="noreferrer"
+                      >
+                        {children}
+                      </a>
+                    );
+                  },
                 }}
               >
                 {String(message.content)}
