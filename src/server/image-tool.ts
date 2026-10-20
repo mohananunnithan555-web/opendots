@@ -2,6 +2,8 @@ import { defineTool } from '@copilotkit/runtime/v2';
 import { z } from 'zod';
 
 export function imageGenerationTool() {
+  const apiKey = process.env.POLLINATIONS_API_KEY?.trim();
+
   return defineTool({
     name: 'generate_image',
     description:
@@ -16,15 +18,19 @@ export function imageGenerationTool() {
     execute: async ({ prompt }) => {
       const cleanPrompt = prompt.trim();
       const seed = Math.floor(Math.random() * 10_000_000);
+      const keyParam = apiKey ? `&key=${encodeURIComponent(apiKey)}` : '';
       const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
         cleanPrompt,
-      )}?width=1024&height=1024&nologo=true&seed=${seed}`;
+      )}?width=1024&height=1024&nologo=true&seed=${seed}${keyParam}`;
 
       return {
         success: true,
         prompt: cleanPrompt,
         imageUrl,
         markdown: `![${cleanPrompt}](${imageUrl})`,
+        rateLimitNotice: apiKey
+          ? undefined
+          : 'Note: Free tier enforces a 45-second cooldown between consecutive images. If generating another image within 45 seconds, mention that they can wait 45s and click the Refresh button below the image, or add a free POLLINATIONS_API_KEY to Render for instant generation.',
       };
     },
   });

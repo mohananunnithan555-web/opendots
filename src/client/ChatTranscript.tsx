@@ -1,6 +1,6 @@
 import { openPageLink } from './page-navigation';
 import { Fragment, useRef, useState, type ReactNode } from 'react';
-import { PhoneOff, Volume2, Square } from 'lucide-react';
+import { PhoneOff, Volume2, Square, RotateCw, ExternalLink } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { AssistantMessage, Message } from '@ag-ui/core';
 import type { CallReceipt } from '../shared/types';
@@ -34,6 +34,108 @@ function Receipt({ call }: { call: CallReceipt }) {
     </div>
   );
 }
+function ChatImage({ src, alt }: { src?: string; alt?: string }) {
+  const [currentSrc, setCurrentSrc] = useState(src);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const isPollinations = src?.includes('pollinations.ai');
+
+  const handleRefresh = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!src) return;
+    setIsRefreshing(true);
+    try {
+      const url = new URL(src, window.location.href);
+      url.searchParams.set(
+        'seed',
+        Math.floor(Math.random() * 10_000_000).toString(),
+      );
+      url.searchParams.set('t', Date.now().toString());
+      setCurrentSrc(url.toString());
+    } catch {
+      setCurrentSrc(`${src}&t=${Date.now()}`);
+    }
+    setTimeout(() => setIsRefreshing(false), 1500);
+  };
+
+  return (
+    <div
+      className="chat-image-block"
+      style={{
+        marginTop: '8px',
+        marginBottom: '8px',
+        maxWidth: '100%',
+        display: 'inline-block',
+      }}
+    >
+      <img
+        src={currentSrc}
+        alt={alt ?? 'Generated image'}
+        className="chat-image"
+        loading="lazy"
+        style={{
+          maxWidth: '100%',
+          borderRadius: '12px',
+          display: 'block',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+        }}
+      />
+      {isPollinations && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            marginTop: '6px',
+            fontSize: '11px',
+            opacity: 0.85,
+          }}
+        >
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            style={{
+              background: 'rgba(255, 255, 255, 0.12)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '6px',
+              padding: '3px 8px',
+              fontSize: '11px',
+              cursor: isRefreshing ? 'wait' : 'pointer',
+              color: 'inherit',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}
+            title="Reloads image with a new seed. If throttled by 45s cooldown, wait 45s and click this!"
+          >
+            <RotateCw size={11} />
+            {isRefreshing ? 'Refreshing...' : 'Retry / Refresh'}
+          </button>
+          <a
+            href={currentSrc}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              fontSize: '11px',
+              color: 'inherit',
+              textDecoration: 'underline',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '3px',
+              opacity: 0.8,
+            }}
+          >
+            <ExternalLink size={11} />
+            Open full size
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ChatTranscript({
   messages,
   calls,
@@ -83,22 +185,7 @@ export function ChatTranscript({
               )}
               <ReactMarkdown
                 components={{
-                  img: ({ src, alt }) => (
-                    <img
-                      src={src}
-                      alt={alt ?? 'Generated image'}
-                      className="chat-image"
-                      loading="lazy"
-                      style={{
-                        maxWidth: '100%',
-                        borderRadius: '12px',
-                        marginTop: '8px',
-                        marginBottom: '8px',
-                        display: 'block',
-                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.12)',
-                      }}
-                    />
-                  ),
+                  img: ({ src, alt }) => <ChatImage src={src} alt={alt} />,
                   a: ({ href, children }) => (
                     <a
                       onClick={(event) => {
