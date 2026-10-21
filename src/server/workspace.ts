@@ -6,6 +6,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { validateLearningSettings } from '../shared/learning.js';
+import { SPECIALIST_ROLES } from './specialists/specialist-roles.js';
 import type { CallReceipt, Conversation, Dot, Space } from '../shared/types.js';
 export class WorkspaceStore {
   private db: DatabaseSync;
@@ -91,6 +92,29 @@ export class WorkspaceStore {
           'whatsapp',
         ],
       );
+    }
+    this.ensureSpecialists();
+  }
+  ensureSpecialists() {
+    const existingDots = this.dots();
+    const defaultSpace = this.spaces()[0];
+    if (!defaultSpace) return;
+
+    for (const spec of Object.values(SPECIALIST_ROLES)) {
+      if (!existingDots.some((d) => d.name === spec.name)) {
+        this.createDot(
+          defaultSpace.id,
+          spec.name,
+          `${spec.systemPrompt} Tagline: ${spec.tagline}`,
+          spec.allowedPermissions.includes('research'),
+          true,
+          [defaultSpace.id],
+          null,
+          false,
+          spec.allowedPermissions.includes('code') || spec.allowedPermissions.includes('media'),
+          [],
+        );
+      }
     }
   }
   close() {
@@ -304,19 +328,16 @@ export class WorkspaceStore {
     return value;
   }
   requireThread(id: string, dotId?: string): Conversation {
-    let thread = this.conversations().find((t) => t.id === id);
-    if (!thread && dotId) {
+    const thread = this.conversations().find((thread) => thread.id === id);
+    if (!thread || (dotId && thread.dotId !== dotId))
+      throw new Error('Conversation does not belong to this Dot and owner.');
+    return thread;
+  }
+  ensureThread(id: string, dotId: string): Conversation {
+    const thread = this.conversations().find((t) => t.id === id);
+    if (!thread) {
       return this.bindThread(id, dotId, 'A new thought');
     }
-    if (thread && dotId && thread.dotId !== dotId) {
-      this.db
-        .prepare('UPDATE thread_bindings SET dotId = ? WHERE id = ?')
-        .run(dotId, id);
-      thread.dotId = dotId;
-      return thread;
-    }
-    if (!thread)
-      throw new Error('Conversation does not belong to this Dot and owner.');
     return thread;
   }
   bindTask(taskId: string, threadId: string) {

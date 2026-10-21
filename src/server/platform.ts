@@ -213,14 +213,14 @@ export class Platform {
     const defaultDotId = this.workspace.dots()[0]?.id;
     if (agentParam?.startsWith('chat-')) {
       const threadId = agentParam.slice(5);
-      const thread = this.workspace.requireThread(threadId, defaultDotId);
+      const thread = this.workspace.ensureThread(threadId, defaultDotId);
       reqUrl.searchParams.set('agentId', thread.dotId);
       finalRequest = new Request(reqUrl.toString(), request);
     }
     const match = reqUrl.pathname.match(/\/agent\/chat-([^/]+)(\/.*)?$/);
     if (match) {
       const threadId = match[1];
-      const thread = this.workspace.requireThread(threadId, defaultDotId);
+      const thread = this.workspace.ensureThread(threadId, defaultDotId);
       reqUrl.pathname = reqUrl.pathname.replace(`/agent/chat-${match[1]}`, `/agent/${thread.dotId}`);
       finalRequest = new Request(reqUrl.toString(), request);
     }

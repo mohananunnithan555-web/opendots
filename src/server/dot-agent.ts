@@ -32,6 +32,11 @@ import { answerObserver, type SetupTelemetry } from './setup-telemetry.js';
 import { createThoughtSignatureFetch } from './thought-signature.js';
 import { imageGenerationTool } from './image-tool.js';
 import { videoGenerationTool } from './video-tool.js';
+import { memoryTools } from './memory-tools.js';
+import { globalSkillRegistry, type SkillPermission } from './skills/index.js';
+import { globalToolRegistry } from './tools/index.js';
+import { TaskPlanner } from './planner/task-planner.js';
+import { plannerTools } from './planner/planner-tools.js';
 const channelError = () => ({
   type: EventType.RUN_ERROR,
   message:
@@ -356,10 +361,45 @@ export class DotAgent extends AbstractAgent {
                 )
               : [];
           check();
+          const userPermissions: SkillPermission[] = [
+            'basic',
+            ...(dot.researchAllowed ? (['research'] as SkillPermission[]) : []),
+            ...(dot.appsAllowed ? (['code', 'media'] as SkillPermission[]) : []),
+            ...(computer.configured ? (['computer'] as SkillPermission[]) : []),
+          ];
+          const skillTools = globalSkillRegistry.toCopilotKitTools(
+            dot.id,
+            userPermissions,
+          );
+
+          const registryTools = globalToolRegistry.toCopilotKitTools(
+            userPermissions,
+            () => ({
+              userId: this.workspace.ownerId,
+              dotId: dot.id,
+              userPermissions,
+              signal: controller.signal,
+            }),
+          );
+
+          const activeMemoryTools =
+            initialSettings.memoryAllowed && dot.memoryAllowed
+              ? memoryTools(this.store, this.workspace.ownerId)
+              : [];
+
+          const activePlannerTools = plannerTools(
+            new TaskPlanner(this.store),
+            this.workspace.ownerId,
+          );
+
           const serverTools = [
             ...tools,
             imageGenerationTool(),
             videoGenerationTool(),
+            ...activeMemoryTools,
+            ...skillTools,
+            ...registryTools,
+            ...activePlannerTools,
             ...appTools,
             ...pageTools(pages),
             ...(computer.configured

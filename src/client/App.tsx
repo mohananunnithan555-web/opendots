@@ -48,6 +48,8 @@ import { TaskRow } from './TaskPresentation';
 import { TaskActions } from './TaskActions';
 import { WorkspaceDialog, type Dialog } from './WorkspaceDialog';
 import { submitComposerOnEnter } from './chat-composer';
+import { MemoryModal } from './MemoryModal';
+import { TaskDashboard } from './TaskDashboard';
 
 function describeFailure(error: unknown, fallback: string) {
   return {
@@ -65,6 +67,8 @@ export function App() {
   const [view, rawSetView] = useState<'chat' | 'tasks' | 'memories' | 'space'>(
     'chat',
   );
+  const [memoryModalOpen, setMemoryModalOpen] = useState(false);
+  const [activityTab, setActivityTab] = useState<'plans' | 'scheduled'>('plans');
   const dirtyPage = useRef(false);
   const [spaceId, setSpaceId] = useState('');
   const [pageId, setPageId] = useState<string>();
@@ -784,13 +788,23 @@ export function App() {
                 </p>
               </div>
               {view === 'memories' && (
-                <button
-                  className="primary"
-                  onClick={() => setDialog({ type: 'memory' })}
-                >
-                  <Plus size={15} />
-                  Add memory
-                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    className="button"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    onClick={() => setMemoryModalOpen(true)}
+                  >
+                    <BookOpen size={15} />
+                    Category Manager
+                  </button>
+                  <button
+                    className="primary"
+                    onClick={() => setDialog({ type: 'memory' })}
+                  >
+                    <Plus size={15} />
+                    Add memory
+                  </button>
+                </div>
               )}
             </div>
             {view === 'memories' ? (
@@ -839,41 +853,62 @@ export function App() {
               </>
             ) : (
               <>
-                <label className="search-box">
-                  <Search size={16} />
-                  <input
-                    aria-label="Search tasks"
-                    placeholder="Find a task…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                </label>
-                <div className="task-list">
-                  {state.tasks
-                    .filter((task) =>
-                      task.prompt.toLowerCase().includes(search.toLowerCase()),
-                    )
-                    .map((task) => (
-                      <TaskRow
-                        key={task.id}
-                        task={task}
-                        onClick={() =>
-                          void api<Detail>(`/tasks/${task.id}`)
-                            .then(setTaskDetail)
-                            .catch((e) => setError(e.message))
-                        }
-                      />
-                    ))}
+                <div style={{ display: 'flex', gap: 12, marginBottom: 16, borderBottom: '1px solid var(--border-color, #e5e7eb)', paddingBottom: 8 }}>
+                  <button
+                    className={activityTab === 'plans' ? 'primary' : 'button'}
+                    onClick={() => setActivityTab('plans')}
+                  >
+                    Autonomous Plans
+                  </button>
+                  <button
+                    className={activityTab === 'scheduled' ? 'primary' : 'button'}
+                    onClick={() => setActivityTab('scheduled')}
+                  >
+                    Scheduled Tasks ({state.tasks.length})
+                  </button>
                 </div>
-                {!state.tasks.length && (
-                  <div className="large-empty">
-                    <Clock3 size={32} />
-                    <h2>Let a thought come back around.</h2>
-                    <p>
-                      Open a conversation and use the clock button to schedule a
-                      server-side task.
-                    </p>
-                  </div>
+
+                {activityTab === 'plans' ? (
+                  <TaskDashboard />
+                ) : (
+                  <>
+                    <label className="search-box">
+                      <Search size={16} />
+                      <input
+                        aria-label="Search tasks"
+                        placeholder="Find a task…"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                      />
+                    </label>
+                    <div className="task-list">
+                      {state.tasks
+                        .filter((task) =>
+                          task.prompt.toLowerCase().includes(search.toLowerCase()),
+                        )
+                        .map((task) => (
+                          <TaskRow
+                            key={task.id}
+                            task={task}
+                            onClick={() =>
+                              void api<Detail>(`/tasks/${task.id}`)
+                                .then(setTaskDetail)
+                                .catch((e) => setError(e.message))
+                            }
+                          />
+                        ))}
+                    </div>
+                    {!state.tasks.length && (
+                      <div className="large-empty">
+                        <Clock3 size={32} />
+                        <h2>Let a thought come back around.</h2>
+                        <p>
+                          Open a conversation and use the clock button to schedule a
+                          server-side task.
+                        </p>
+                      </div>
+                    )}
+                  </>
                 )}
                 {taskDetail && (
                   <section className="task-detail-card">
@@ -953,6 +988,13 @@ export function App() {
           mutate={mutate}
         />
       )}
+      <MemoryModal
+        isOpen={memoryModalOpen}
+        onClose={() => {
+          setMemoryModalOpen(false);
+          void refresh();
+        }}
+      />
     </div>
   );
   return configured ? (

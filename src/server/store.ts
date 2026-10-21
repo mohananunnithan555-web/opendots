@@ -2,6 +2,14 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import {
+  containsSensitiveSecret,
+  sanitizeMemoryContent,
+  type MemoryCategory,
+  type MemoryFilter,
+  type MemoryRecord,
+} from './memory-types.js';
+import type { TaskPlan } from './planner/types.js';
 import type {
   Action,
   Detail,
@@ -34,9 +42,52 @@ export class Store {
       CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, taskId TEXT NOT NULL, status TEXT NOT NULL, startedAt INTEGER NOT NULL, finishedAt INTEGER, result TEXT, error TEXT);
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, taskId TEXT NOT NULL, runId TEXT, text TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, text TEXT NOT NULL, createdAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS memories_v2 (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT NOT NULL,
+        category TEXT NOT NULL,
+        text TEXT NOT NULL,
+        confidence REAL DEFAULT 1.0,
+        pinned INTEGER DEFAULT 0,
+        source TEXT NOT NULL DEFAULT 'user_explicit',
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        lastAccessedAt INTEGER
+      );
       CREATE INDEX IF NOT EXISTS tasks_due ON tasks(status, nextRunAt);
       CREATE INDEX IF NOT EXISTS runs_task ON runs(taskId, startedAt);
-      CREATE INDEX IF NOT EXISTS events_task ON events(taskId, id);`);
+      CREATE INDEX IF NOT EXISTS events_task ON events(taskId, id);
+      CREATE INDEX IF NOT EXISTS memories_v2_owner_cat ON memories_v2(ownerId, category);
+      CREATE INDEX IF NOT EXISTS memories_v2_created ON memories_v2(createdAt DESC);
+      CREATE TABLE IF NOT EXISTS task_plans (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT NOT NULL DEFAULT 'opendots-owner',
+        goal TEXT NOT NULL,
+        status TEXT NOT NULL,
+        currentStepIndex INTEGER NOT NULL DEFAULT 0,
+        stepsJson TEXT NOT NULL,
+        finalResult TEXT,
+        error TEXT,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS task_plans_owner ON task_plans(ownerId, createdAt DESC);`);
+
+    // Migrate any legacy rows into memories_v2
+    try {
+      const legacyRows = this.db
+        .prepare('SELECT * FROM memories')
+        .all() as unknown as Array<{ id: string; text: string; createdAt: number }>;
+      for (const row of legacyRows) {
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO memories_v2 (id, ownerId, category, text, confidence, pinned, source, createdAt, updatedAt)
+             VALUES (?, 'opendots-owner', 'preference', ?, 1.0, 0, 'user_explicit', ?, ?)`,
+          )
+          .run(row.id, row.text, row.createdAt, row.createdAt);
+      }
+    } catch {}
+
     this.db
       .prepare('INSERT OR IGNORE INTO settings VALUES (1, ?)')
       .run(JSON.stringify(defaults));
@@ -207,6 +258,15 @@ export class Store {
     );
     return this.task(id);
   }
+  deleteTask(id: string): boolean {
+    return this.transaction(() => {
+      this.db.prepare('DELETE FROM events WHERE taskId=?').run(id);
+      this.db.prepare('DELETE FROM runs WHERE taskId=?').run(id);
+      return (
+        Number(this.db.prepare('DELETE FROM tasks WHERE id=?').run(id).changes) > 0
+      );
+    });
+  }
   claim(
     now = Date.now(),
     leaseDurationMs = DEFAULT_WORKER_LEASE_MS,
@@ -279,41 +339,358 @@ export class Store {
       if (this.owns(claim)) this.invalidate(claim, 'interrupted', reason);
     });
   }
-  fail(claim: Claim, error: string) {
+  fail(claim: Claim, error: string, maxRetries = 0) {
     this.transaction(() => {
       if (!this.owns(claim)) return;
       const now = Date.now();
+      const task = this.task(claim.id);
+
       this.db
         .prepare(
           "UPDATE runs SET status='failed', finishedAt=?, error=? WHERE id=?",
         )
         .run(now, error, claim.lease);
-      this.db
-        .prepare(
-          "UPDATE tasks SET status='failed', lease=NULL, leaseUntil=NULL, error=?, updatedAt=? WHERE id=?",
-        )
-        .run(error, now, claim.id);
-      this.event(claim.id, claim.lease, error);
+
+      // Count recent consecutive failed runs within the last hour
+      const recentFails = Number(
+        (
+          this.db
+            .prepare(
+              "SELECT COUNT(*) as count FROM runs WHERE taskId=? AND status='failed' AND startedAt > ?",
+            )
+            .get(claim.id, now - 3600_000) as { count: number }
+        )?.count ?? 1,
+      );
+
+      if (maxRetries > 0 && recentFails <= maxRetries) {
+        // Exponential backoff: 2s, 4s, 8s, up to 60s
+        const backoffMs = Math.min(60_000, 2000 * Math.pow(2, recentFails - 1));
+        const retryAt = now + backoffMs;
+        this.db
+          .prepare(
+            "UPDATE tasks SET status='queued', lease=NULL, leaseUntil=NULL, error=?, nextRunAt=?, updatedAt=? WHERE id=?",
+          )
+          .run(
+            `Attempt ${recentFails} failed: ${error} (retrying in ${backoffMs / 1000}s)`,
+            retryAt,
+            now,
+            claim.id,
+          );
+        this.event(
+          claim.id,
+          claim.lease,
+          `Attempt ${recentFails} failed. Retrying in ${backoffMs / 1000}s.`,
+        );
+      } else {
+        // Exceeded max retries or maxRetries is 0. If recurring, schedule for next interval
+        const nextRun =
+          task?.intervalSeconds && task.intervalSeconds > 0
+            ? now + task.intervalSeconds * 1000
+            : null;
+        this.db
+          .prepare(
+            "UPDATE tasks SET status='failed', lease=NULL, leaseUntil=NULL, error=?, nextRunAt=?, updatedAt=? WHERE id=?",
+          )
+          .run(error, nextRun, now, claim.id);
+        this.event(
+          claim.id,
+          claim.lease,
+          nextRun
+            ? `Run failed. Next scheduled run in ${task!.intervalSeconds}s.`
+            : error,
+        );
+      }
     });
   }
   memories(): Memory[] {
     return this.db
-      .prepare('SELECT * FROM memories ORDER BY createdAt DESC')
+      .prepare('SELECT id, text, createdAt FROM memories_v2 ORDER BY pinned DESC, createdAt DESC')
       .all() as unknown as Memory[];
   }
+
+  memoriesV2(
+    filter?: MemoryFilter,
+    ownerId: string = 'opendots-owner',
+  ): MemoryRecord[] {
+    let query = 'SELECT * FROM memories_v2 WHERE ownerId = ?';
+    const params: (string | number)[] = [ownerId];
+
+    if (filter?.category) {
+      query += ' AND category = ?';
+      params.push(filter.category);
+    }
+    if (filter?.pinnedOnly) {
+      query += ' AND pinned = 1';
+    }
+    if (filter?.query) {
+      query += ' AND text LIKE ?';
+      params.push(`%${filter.query.trim()}%`);
+    }
+
+    query += ' ORDER BY pinned DESC, createdAt DESC';
+
+    if (filter?.limit && filter.limit > 0) {
+      query += ' LIMIT ?';
+      params.push(filter.limit);
+    }
+
+    const rows = this.db.prepare(query).all(...params) as unknown as Array<{
+      id: string;
+      ownerId: string;
+      category: string;
+      text: string;
+      confidence: number;
+      pinned: number;
+      source: string;
+      createdAt: number;
+      updatedAt: number;
+      lastAccessedAt: number | null;
+    }>;
+
+    return rows.map((row) => ({
+      ...row,
+      category: row.category as MemoryCategory,
+      pinned: Boolean(row.pinned),
+      source: row.source as 'user_explicit' | 'agent_inferred',
+      lastAccessedAt: row.lastAccessedAt ?? undefined,
+    }));
+  }
+
   saveMemory(text: string, id: string = randomUUID()): Memory {
+    const record = this.saveMemoryV2({ text, id });
+    return {
+      id: record.id,
+      text: record.text,
+      createdAt: record.createdAt,
+    };
+  }
+
+  saveMemoryV2(options: {
+    text: string;
+    id?: string;
+    category?: MemoryCategory;
+    ownerId?: string;
+    confidence?: number;
+    pinned?: boolean;
+    source?: 'user_explicit' | 'agent_inferred';
+  }): MemoryRecord {
+    const rawText = options.text.trim();
+    if (!rawText) {
+      throw new Error('Memory text cannot be empty.');
+    }
+
+    // Reject raw secrets/passwords
+    if (containsSensitiveSecret(rawText)) {
+      throw new Error(
+        'Security policy: Passwords, API keys, and sensitive payment data cannot be stored in persistent memory.',
+      );
+    }
+
+    const cleanText = sanitizeMemoryContent(rawText);
+    const id = options.id ?? randomUUID();
+    const ownerId = options.ownerId ?? 'opendots-owner';
+    const category = options.category ?? 'preference';
+    const confidence = options.confidence ?? 1.0;
+    const pinned = options.pinned ? 1 : 0;
+    const source = options.source ?? 'user_explicit';
+    const now = Date.now();
+
+    // Check for similar memory in the same category to update instead of duplicating
+    const existing = this.db
+      .prepare(
+        'SELECT id FROM memories_v2 WHERE ownerId = ? AND category = ? AND text = ?',
+      )
+      .get(ownerId, category, cleanText) as { id: string } | undefined;
+
+    const targetId = existing?.id ?? id;
+
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO memories_v2 (id, ownerId, category, text, confidence, pinned, source, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             text=excluded.text,
+             category=excluded.category,
+             confidence=excluded.confidence,
+             pinned=excluded.pinned,
+             updatedAt=excluded.updatedAt`,
+        )
+        .run(
+          targetId,
+          ownerId,
+          category,
+          cleanText,
+          confidence,
+          pinned,
+          source,
+          now,
+          now,
+        );
+
+      // Keep legacy table synchronized for any older direct queries
+      this.db
+        .prepare(
+          'INSERT INTO memories VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET text=excluded.text',
+        )
+        .run(targetId, cleanText, now);
+    });
+
+    return this.memoriesV2({ query: cleanText }, ownerId).find(
+      (m) => m.id === targetId,
+    )!;
+  }
+
+  deleteMemory(id: string): boolean {
+    return this.forgetMemory(id);
+  }
+
+  forgetMemory(id: string, ownerId: string = 'opendots-owner'): boolean {
+    let changed = 0;
+    this.transaction(() => {
+      changed = Number(
+        this.db
+          .prepare('DELETE FROM memories_v2 WHERE id = ? AND ownerId = ?')
+          .run(id, ownerId).changes,
+      );
+      this.db.prepare('DELETE FROM memories WHERE id = ?').run(id);
+    });
+    return changed > 0;
+  }
+
+  clearMemoriesCategory(
+    category: MemoryCategory,
+    ownerId: string = 'opendots-owner',
+  ): number {
+    let deleted = 0;
+    this.transaction(() => {
+      const records = this.db
+        .prepare('SELECT id FROM memories_v2 WHERE ownerId = ? AND category = ?')
+        .all(ownerId, category) as unknown as Array<{ id: string }>;
+
+      for (const rec of records) {
+        this.db.prepare('DELETE FROM memories WHERE id = ?').run(rec.id);
+      }
+
+      deleted = Number(
+        this.db
+          .prepare('DELETE FROM memories_v2 WHERE ownerId = ? AND category = ?')
+          .run(ownerId, category).changes,
+      );
+    });
+    return deleted;
+  }
+
+  searchMemories(
+    query: string,
+    category?: MemoryCategory,
+    ownerId: string = 'opendots-owner',
+  ): MemoryRecord[] {
+    return this.memoriesV2({ query, category }, ownerId);
+  }
+
+  saveTaskPlan(plan: TaskPlan): TaskPlan {
+    const now = Date.now();
     this.db
       .prepare(
-        'INSERT INTO memories VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET text=excluded.text',
+        `INSERT INTO task_plans (id, ownerId, goal, status, currentStepIndex, stepsJson, finalResult, error, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           status=excluded.status,
+           currentStepIndex=excluded.currentStepIndex,
+           stepsJson=excluded.stepsJson,
+           finalResult=excluded.finalResult,
+           error=excluded.error,
+           updatedAt=excluded.updatedAt`,
       )
-      .run(id, text, Date.now());
-    return this.db
-      .prepare('SELECT * FROM memories WHERE id=?')
-      .get(id) as unknown as Memory;
+      .run(
+        plan.id,
+        plan.ownerId,
+        plan.goal,
+        plan.status,
+        plan.currentStepIndex,
+        JSON.stringify(plan.steps),
+        plan.finalResult ?? null,
+        plan.error ?? null,
+        plan.createdAt || now,
+        now,
+      );
+    return this.getTaskPlan(plan.id, plan.ownerId) ?? plan;
   }
-  deleteMemory(id: string): boolean {
+
+  getTaskPlan(id: string, ownerId: string = 'opendots-owner'): TaskPlan | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM task_plans WHERE id = ? AND ownerId = ?')
+      .get(id, ownerId) as unknown as {
+        id: string;
+        ownerId: string;
+        goal: string;
+        status: string;
+        currentStepIndex: number;
+        stepsJson: string;
+        finalResult: string | null;
+        error: string | null;
+        createdAt: number;
+        updatedAt: number;
+      } | undefined;
+
+    if (!row) return undefined;
+
+    try {
+      return {
+        id: row.id,
+        ownerId: row.ownerId,
+        goal: row.goal,
+        status: row.status as any,
+        currentStepIndex: row.currentStepIndex,
+        steps: JSON.parse(row.stepsJson),
+        finalResult: row.finalResult ?? undefined,
+        error: row.error ?? undefined,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  listTaskPlans(ownerId: string = 'opendots-owner'): TaskPlan[] {
+    const rows = this.db
+      .prepare('SELECT * FROM task_plans WHERE ownerId = ? ORDER BY createdAt DESC')
+      .all(ownerId) as unknown as Array<{
+        id: string;
+        ownerId: string;
+        goal: string;
+        status: string;
+        currentStepIndex: number;
+        stepsJson: string;
+        finalResult: string | null;
+        error: string | null;
+        createdAt: number;
+        updatedAt: number;
+      }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      ownerId: row.ownerId,
+      goal: row.goal,
+      status: row.status as any,
+      currentStepIndex: row.currentStepIndex,
+      steps: JSON.parse(row.stepsJson),
+      finalResult: row.finalResult ?? undefined,
+      error: row.error ?? undefined,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+  }
+
+  deleteTaskPlan(id: string, ownerId: string = 'opendots-owner'): boolean {
     return (
-      this.db.prepare('DELETE FROM memories WHERE id=?').run(id).changes > 0
+      Number(
+        this.db
+          .prepare('DELETE FROM task_plans WHERE id = ? AND ownerId = ?')
+          .run(id, ownerId).changes,
+      ) > 0
     );
   }
 }

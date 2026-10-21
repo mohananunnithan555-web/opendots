@@ -10,6 +10,7 @@ import { configured, type Config } from './research.js';
 import type { Platform } from './platform.js';
 import { VoiceService } from './voice.js';
 import { workspaceRoutes } from './workspace-routes.js';
+import { TaskPlanner } from './planner/task-planner.js';
 const interval = z.number().int().min(60).max(31_536_000).nullable();
 export interface AppOptions {
   store: Store;
@@ -28,6 +29,7 @@ export function createApp({
   platform,
 }: AppOptions) {
   const app = new Hono();
+  const taskPlanner = new TaskPlanner(store);
   app.use(
     '/api/*',
     bodyLimit({
@@ -59,56 +61,14 @@ export function createApp({
       'localhost',
       '127.0.0.1',
       '[::1]',
-      '0.0.0.0',
       ...originHostnames,
     ]);
-    if (
-      !ownerToken &&
-      origins &&
-      origins.length > 0 &&
-      !allowedHosts.has(requestUrl.hostname) &&
-      !requestUrl.hostname.endsWith('.onrender.com')
-    )
+    if (!ownerToken && !allowedHosts.has(requestUrl.hostname))
       return c.json({ error: 'Unrecognized host.' }, 403);
     const requestOrigin = c.req.header('origin');
-    const forwardedProto =
-      c.req.header('x-forwarded-proto') ??
-      (c.req.url.startsWith('https') ? 'https' : 'http');
-    const forwardedHost =
-      c.req.header('x-forwarded-host') ??
-      c.req.header('host') ??
-      requestUrl.host;
-    const currentOrigin = `${forwardedProto}://${forwardedHost}`;
-    const allowedOrigins = new Set([
-      ...(origins ?? []),
-      currentOrigin,
-      new URL(c.req.url).origin,
-      `https://${forwardedHost}`,
-      `http://${forwardedHost}`,
-    ]);
+    const allowedOrigins = new Set(origins ?? [new URL(c.req.url).origin]);
 
-    let isAllowedOrigin = false;
-    if (!requestOrigin) {
-      isAllowedOrigin = true;
-    } else if (allowedOrigins.has(requestOrigin)) {
-      isAllowedOrigin = true;
-    } else {
-      try {
-        const originUrl = new URL(requestOrigin);
-        const hostOnly = forwardedHost.split(':')[0];
-        if (
-          originUrl.hostname === hostOnly ||
-          originUrl.hostname.endsWith('.onrender.com') ||
-          originUrl.hostname === 'localhost' ||
-          originUrl.hostname === '127.0.0.1' ||
-          originHostnames.includes(originUrl.hostname)
-        ) {
-          isAllowedOrigin = true;
-        }
-      } catch {}
-    }
-
-    if (!isAllowedOrigin)
+    if (requestOrigin && !allowedOrigins.has(requestOrigin))
       return c.json({ error: 'Cross-origin requests are not allowed.' }, 403);
     if (c.req.header('sec-fetch-site') === 'cross-site')
       return c.json({ error: 'Cross-site requests are not allowed.' }, 403);
@@ -226,6 +186,12 @@ export function createApp({
     const task = store.schedule(c.req.param('id'), parsed.data.intervalSeconds);
     return task ? c.json(task) : c.json({ error: 'Task not found.' }, 404);
   });
+  app.delete('/api/tasks/:id', (c) => {
+    runner.abort(c.req.param('id'));
+    return store.deleteTask(c.req.param('id'))
+      ? c.json({ ok: true })
+      : c.json({ error: 'Task not found.' }, 404);
+  });
   app.patch('/api/settings', async (c) => {
     const parsed = z
       .object({
@@ -251,9 +217,25 @@ export function createApp({
     else void voice?.resumePending();
     return c.json(settings);
   });
+  app.get('/api/memories', (c) => {
+    const category = c.req.query('category') as any;
+    const query = c.req.query('query');
+    return c.json(store.memoriesV2({ category, query }));
+  });
   app.post('/api/memories', async (c) => {
     const parsed = z
-      .object({ text: z.string().trim().min(1).max(2000) })
+      .object({
+        text: z.string().trim().min(1).max(2000),
+        category: z
+          .enum([
+            'preference',
+            'project',
+            'conversation_summary',
+            'task_context',
+          ])
+          .optional(),
+        pinned: z.boolean().optional(),
+      })
       .strict()
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success)
@@ -261,11 +243,34 @@ export function createApp({
         { error: 'Memory must be between 1 and 2,000 characters.' },
         400,
       );
-    return c.json(store.saveMemory(parsed.data.text), 201);
+    try {
+      const record = store.saveMemoryV2({
+        text: parsed.data.text,
+        category: parsed.data.category,
+        pinned: parsed.data.pinned,
+      });
+      return c.json(record, 201);
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : 'Invalid memory input.' },
+        400,
+      );
+    }
   });
   app.put('/api/memories/:id', async (c) => {
     const parsed = z
-      .object({ text: z.string().trim().min(1).max(2000) })
+      .object({
+        text: z.string().trim().min(1).max(2000),
+        category: z
+          .enum([
+            'preference',
+            'project',
+            'conversation_summary',
+            'task_context',
+          ])
+          .optional(),
+        pinned: z.boolean().optional(),
+      })
       .strict()
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success)
@@ -273,15 +278,96 @@ export function createApp({
         { error: 'Memory must be between 1 and 2,000 characters.' },
         400,
       );
-    if (!store.memories().some((m) => m.id === c.req.param('id')))
+    if (!store.memoriesV2().some((m) => m.id === c.req.param('id')))
       return c.json({ error: 'Memory not found.' }, 404);
-    return c.json(store.saveMemory(parsed.data.text, c.req.param('id')));
+    try {
+      const record = store.saveMemoryV2({
+        id: c.req.param('id'),
+        text: parsed.data.text,
+        category: parsed.data.category,
+        pinned: parsed.data.pinned,
+      });
+      return c.json(record);
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : 'Invalid memory input.' },
+        400,
+      );
+    }
   });
   app.delete('/api/memories/:id', (c) =>
-    store.deleteMemory(c.req.param('id'))
+    store.forgetMemory(c.req.param('id'))
       ? c.json({ ok: true })
       : c.json({ error: 'Memory not found.' }, 404),
   );
+  app.delete('/api/memories', (c) => {
+    const category = c.req.query('category') as any;
+    if (!category) {
+      return c.json({ error: 'Specify a category to clear.' }, 400);
+    }
+    const count = store.clearMemoriesCategory(category);
+    return c.json({ ok: true, deleted: count });
+  });
+
+  // Autonomous Task Plans API
+  app.get('/api/plans', (c) => {
+    return c.json(taskPlanner.listPlans());
+  });
+
+  app.post('/api/plans', async (c) => {
+    const parsed = z
+      .object({ goal: z.string().trim().min(1).max(2000) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: 'Goal is required and must be under 2,000 characters.' }, 400);
+    }
+    try {
+      const plan = taskPlanner.createPlan(parsed.data.goal);
+      return c.json(plan, 201);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Failed to create plan.' }, 400);
+    }
+  });
+
+  app.get('/api/plans/:id', (c) => {
+    const plan = taskPlanner.getPlan(c.req.param('id'));
+    return plan ? c.json(plan) : c.json({ error: 'Plan not found.' }, 404);
+  });
+
+  app.post('/api/plans/:id/step', async (c) => {
+    try {
+      const result = await taskPlanner.executeNextStep(c.req.param('id'));
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Step execution failed.' }, 400);
+    }
+  });
+
+  app.post('/api/plans/:id/steps/:stepId/approve', async (c) => {
+    try {
+      const result = await taskPlanner.approveStep(c.req.param('id'), c.req.param('stepId'));
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Approval failed.' }, 400);
+    }
+  });
+
+  app.post('/api/plans/:id/cancel', (c) => {
+    try {
+      const plan = taskPlanner.cancelPlan(c.req.param('id'));
+      return c.json(plan);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Cancellation failed.' }, 400);
+    }
+  });
+
+  app.delete('/api/plans/:id', (c) => {
+    return store.deleteTaskPlan(c.req.param('id'))
+      ? c.json({ ok: true })
+      : c.json({ error: 'Plan not found.' }, 404);
+  });
+
   app.onError((error, c) => {
     console.error('API request failed:', error.name);
     return c.json(

@@ -1,8 +1,13 @@
-let token = sessionStorage.getItem('opendots-token') ?? '';
+let token =
+  typeof sessionStorage !== 'undefined'
+    ? (sessionStorage.getItem('opendots-token') ?? '')
+    : '';
 export function setToken(value: string) {
   token = value;
-  if (value) sessionStorage.setItem('opendots-token', value);
-  else sessionStorage.removeItem('opendots-token');
+  if (typeof sessionStorage !== 'undefined') {
+    if (value) sessionStorage.setItem('opendots-token', value);
+    else sessionStorage.removeItem('opendots-token');
+  }
 }
 export class ApiError extends Error {
   constructor(

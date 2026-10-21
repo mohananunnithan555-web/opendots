@@ -9,6 +9,7 @@ import {
 } from '../shared/computer-types.js';
 import type { WorkspaceStore } from './workspace.js';
 import type { PlatformConfig } from './platform-config.js';
+import { validateBrowserNavigationUrl } from './computer-guardrails.js';
 const stateSchema = z.object({
   botId: z.string(),
   container: z.string(),
@@ -331,6 +332,14 @@ export class ComputerService {
     if (!Object.hasOwn(computerInputs, action))
       throw new Error('Unknown computer action.');
     const parsed = computerInputs[action].parse(input);
+
+    if (action === 'navigate') {
+      const targetUrl = (parsed as { url: string }).url;
+      const validation = validateBrowserNavigationUrl(targetUrl);
+      if (!validation.valid) {
+        throw new Error(validation.error);
+      }
+    }
     return this.audited(id, action, actor, async () => {
       if (actor === 'agent' && action.startsWith('human_'))
         throw new Error('Human controls are owner-only.');
