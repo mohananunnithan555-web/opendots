@@ -4,3 +4,7 @@ export * from './tool-registry.js';
 export * from './builtin/calculator.js';
 export * from './builtin/text-analyzer.js';
 export * from './builtin/web-reader.js';
+export * from './builtin/shopping-research.js';
+export * from './builtin/instagram-research.js';
+export * from './builtin/execution-report.js';
+export * from './builtin/step-verifier.js';

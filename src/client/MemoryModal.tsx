@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Search, Trash2, Pin, Plus, Brain } from 'lucide-react';
+import { X, Search, Trash2, Pin, Plus, Brain, Download, AlertTriangle } from 'lucide-react';
 import { api } from './api';
 
 export interface MemoryRecord {
@@ -74,6 +74,23 @@ export function MemoryModal({ isOpen, onClose }: MemoryModalProps) {
     }
   };
 
+  const handleExport = (format: 'markdown' | 'json') => {
+    window.open(`/api/memories/export?format=${format}`, '_blank');
+  };
+
+  const handlePurge = async () => {
+    const target = selectedCategory === 'all' ? 'ALL memories' : `all "${selectedCategory}" memories`;
+    if (!confirm(`Are you sure you want to permanently delete ${target}?`)) return;
+    try {
+      await api('/api/memories/purge', 'POST', {
+        category: selectedCategory === 'all' ? undefined : selectedCategory,
+      });
+      fetchMemories();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to purge memories.');
+    }
+  };
+
   const filteredMemories = memories.filter((m) => {
     if (!searchQuery.trim()) return true;
     return m.text.toLowerCase().includes(searchQuery.toLowerCase());
@@ -126,18 +143,75 @@ export function MemoryModal({ isOpen, onClose }: MemoryModalProps) {
               Personal Memory Manager
             </h2>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'inherit',
-              cursor: 'pointer',
-              opacity: 0.7,
-            }}
-          >
-            <X size={20} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              onClick={() => handleExport('markdown')}
+              title="Export Memories as Markdown"
+              style={{
+                background: 'rgba(255,255,255,0.08)',
+                border: 'none',
+                color: 'inherit',
+                cursor: 'pointer',
+                borderRadius: '6px',
+                padding: '4px 8px',
+                fontSize: '11px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              <Download size={13} /> Export .MD
+            </button>
+            <button
+              onClick={() => handleExport('json')}
+              title="Export Memories as JSON"
+              style={{
+                background: 'rgba(255,255,255,0.08)',
+                border: 'none',
+                color: 'inherit',
+                cursor: 'pointer',
+                borderRadius: '6px',
+                padding: '4px 8px',
+                fontSize: '11px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              <Download size={13} /> JSON
+            </button>
+            <button
+              onClick={handlePurge}
+              title="Purge Selected Category"
+              style={{
+                background: 'rgba(244,63,94,0.1)',
+                border: '1px solid rgba(244,63,94,0.2)',
+                color: '#f43f5e',
+                cursor: 'pointer',
+                borderRadius: '6px',
+                padding: '4px 8px',
+                fontSize: '11px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              <Trash2 size={13} /> Purge
+            </button>
+            <button
+              onClick={onClose}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'inherit',
+                cursor: 'pointer',
+                opacity: 0.7,
+                marginLeft: '8px',
+              }}
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         {/* Categories Tab Bar */}

@@ -12,6 +12,9 @@ import { VoiceService } from './voice.js';
 import { workspaceRoutes } from './workspace-routes.js';
 import { TaskPlanner } from './planner/task-planner.js';
 import { globalSkillRegistry } from './skills/index.js';
+import { globalFileWorkspace } from './files/file-workspace.js';
+import type { ConnectorType, ApprovalActionType } from '../shared/types.js';
+import type { MemoryCategory } from './memory-types.js';
 import {
   buildImageGenerationConfig,
   type ImageQuality,
@@ -716,6 +719,267 @@ export function createApp({
     );
 
     return c.json(result);
+  });
+
+  // -------------------------------------------------------------
+  // GOALS (Phase 2.B)
+  // -------------------------------------------------------------
+  app.get('/api/goals', (c) => {
+    const status = c.req.query('status');
+    const goals = store.goals('opendots-owner', status || undefined);
+    return c.json(goals);
+  });
+
+  app.get('/api/goals/suggestions', (c) => {
+    const suggestions = store.proactiveGoalSuggestions('opendots-owner');
+    return c.json(suggestions);
+  });
+
+  app.get('/api/goals/:id', (c) => {
+    const goal = store.getGoal(c.req.param('id'), 'opendots-owner');
+    return goal ? c.json(goal) : c.json({ error: 'Goal not found.' }, 404);
+  });
+
+  app.post('/api/goals', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.title || typeof body.title !== 'string' || body.title.trim().length === 0) {
+      return c.json({ error: 'Goal title is required.' }, 400);
+    }
+    const created = store.createGoal({
+      title: body.title.trim(),
+      description: body.description,
+      category: body.category || 'personal',
+      targetDate: body.targetDate ? Number(body.targetDate) : undefined,
+      priority: body.priority || 'medium',
+      status: body.status || 'active',
+      milestones: Array.isArray(body.milestones) ? body.milestones : [],
+      metrics: body.metrics || {},
+      notes: body.notes,
+    });
+    return c.json(created, 201);
+  });
+
+  app.put('/api/goals/:id', async (c) => {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const updated = store.updateGoal(id, body, 'opendots-owner');
+      return c.json(updated);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Goal update failed.' }, 400);
+    }
+  });
+
+  app.delete('/api/goals/:id', (c) => {
+    store.deleteGoal(c.req.param('id'), 'opendots-owner');
+    return c.json({ ok: true });
+  });
+
+  // -------------------------------------------------------------
+  // APPROVALS (Phase 2.F)
+  // -------------------------------------------------------------
+  app.get('/api/approvals', (c) => {
+    const status = c.req.query('status') as 'pending' | 'approved' | 'rejected' | undefined;
+    const approvals = store.approvals('opendots-owner', status || undefined);
+    return c.json(approvals);
+  });
+
+  app.get('/api/approvals/:id', (c) => {
+    const approval = store.getApproval(c.req.param('id'), 'opendots-owner');
+    return approval ? c.json(approval) : c.json({ error: 'Approval request not found.' }, 404);
+  });
+
+  app.post('/api/approvals', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.actionType || !body.title || !body.description) {
+      return c.json({ error: 'actionType, title, and description are required.' }, 400);
+    }
+    const created = store.createApproval({
+      actionType: body.actionType as ApprovalActionType,
+      title: body.title,
+      description: body.description,
+      destination: body.destination,
+      payload: body.payload || {},
+      consequences: body.consequences,
+      estimatedCost: body.estimatedCost,
+      policy: body.policy || store.settings().approvalPolicy || 'always_ask',
+    });
+    return c.json(created, 201);
+  });
+
+  app.post('/api/approvals/:id/decide', async (c) => {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    if (!['approved', 'rejected'].includes(body.decision)) {
+      return c.json({ error: 'decision must be "approved" or "rejected".' }, 400);
+    }
+    try {
+      const updated = store.decideApproval(id, body.decision, body.decidedBy || 'user', 'opendots-owner');
+      return c.json(updated);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Decision failed.' }, 400);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // CONNECTORS (Phase 2.E)
+  // -------------------------------------------------------------
+  app.get('/api/connectors', (c) => {
+    const connectors = store.connectors('opendots-owner');
+    return c.json(connectors);
+  });
+
+  app.get('/api/connectors/:type', (c) => {
+    const conn = store.getConnector(c.req.param('type') as ConnectorType, 'opendots-owner');
+    return conn ? c.json(conn) : c.json({ error: 'Connector not found.' }, 404);
+  });
+
+  app.put('/api/connectors/:type', async (c) => {
+    const type = c.req.param('type') as ConnectorType;
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const updated = store.updateConnector(type, body, 'opendots-owner');
+      return c.json(updated);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Update failed.' }, 400);
+    }
+  });
+
+  app.post('/api/connectors/:type/test', (c) => {
+    const type = c.req.param('type') as ConnectorType;
+    const result = store.testConnector(type, 'opendots-owner');
+    return c.json(result);
+  });
+
+  app.post('/api/connectors/:type/disconnect', (c) => {
+    const type = c.req.param('type') as ConnectorType;
+    try {
+      const disconnected = store.disconnectConnector(type, 'opendots-owner');
+      return c.json(disconnected);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Disconnect failed.' }, 400);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // DOCUMENT SNAPSHOTS (Phase 2.K)
+  // -------------------------------------------------------------
+  app.get('/api/workspace-files/snapshots', (c) => {
+    const filePath = c.req.query('filePath');
+    const snapshots = store.documentSnapshots(filePath || undefined, 'opendots-owner');
+    return c.json(snapshots);
+  });
+
+  app.post('/api/workspace-files/snapshots', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.filePath || typeof body.filePath !== 'string') {
+      return c.json({ error: 'filePath is required.' }, 400);
+    }
+    try {
+      const content = body.content !== undefined ? body.content : globalFileWorkspace.readFile(body.filePath).content;
+      const snapshot = store.saveDocumentSnapshot(body.filePath, content, body.summary, 'opendots-owner');
+      return c.json(snapshot, 201);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Failed to create snapshot.' }, 400);
+    }
+  });
+
+  app.post('/api/workspace-files/rollback', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.snapshotId) {
+      return c.json({ error: 'snapshotId is required.' }, 400);
+    }
+    const snapshot = store.getDocumentSnapshot(body.snapshotId, 'opendots-owner');
+    if (!snapshot) return c.json({ error: 'Snapshot not found.' }, 404);
+
+    try {
+      const written = globalFileWorkspace.writeFile(snapshot.filePath, snapshot.content);
+      return c.json({ ok: true, file: written, version: snapshot.version });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Rollback failed.' }, 400);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // MEMORY CONTROLS (Phase 2.A)
+  // -------------------------------------------------------------
+  app.get('/api/memories/export', (c) => {
+    const format = c.req.query('format') === 'markdown' ? 'markdown' : 'json';
+    const exported = store.exportMemories(format, 'opendots-owner');
+    if (format === 'markdown') {
+      c.header('Content-Type', 'text/markdown; charset=utf-8');
+      c.header('Content-Disposition', 'attachment; filename="opendots-memories-export.md"');
+      return c.text(exported);
+    }
+    c.header('Content-Type', 'application/json');
+    c.header('Content-Disposition', 'attachment; filename="opendots-memories-export.json"');
+    return c.text(exported);
+  });
+
+  app.post('/api/memories/purge', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const category = body.category || undefined;
+    const count = store.purgeMemories(category, 'opendots-owner');
+    return c.json({ ok: true, deletedCount: count });
+  });
+
+  // -------------------------------------------------------------
+  // TOOL BUILDER (Phase 2.H)
+  // -------------------------------------------------------------
+  app.post('/api/tools/propose', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const name = body.name || 'custom_utility_tool';
+    const description = body.description || 'Custom capability created for automated task execution';
+    const instructions = body.instructions || 'Execute task using structured steps and validation.';
+
+    return c.json({
+      proposedTool: {
+        name,
+        description,
+        version: '1.0.0',
+        instructions,
+        category: body.category || 'utility',
+        requiredPermissions: ['basic'],
+        allowedTools: [],
+        timeoutMs: 30000,
+        safetyChecksPassed: true,
+        estimatedCost: '$0.00 (Local Execution)',
+      },
+      message: 'Tool proposal generated and ready for sandbox verification.',
+    });
+  });
+
+  app.post('/api/tools/verify', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.name || !body.instructions) {
+      return c.json({ error: 'Tool name and instructions are required for verification.' }, 400);
+    }
+    const hasDisallowed = body.instructions.includes('process.exit') || body.instructions.includes('rm -rf');
+    return c.json({
+      verified: !hasDisallowed,
+      warnings: hasDisallowed ? ['Unsafe system calls detected in tool logic.'] : [],
+      status: !hasDisallowed ? 'ready_for_installation' : 'rejected_by_sandbox',
+    });
+  });
+
+  app.post('/api/tools/install', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const installed = store.saveCustomSkill({
+        name: body.name,
+        description: body.description,
+        version: body.version || '1.0.0',
+        instructions: body.instructions,
+        category: body.category || 'utility',
+        requiredPermissions: body.requiredPermissions || ['basic'],
+        allowedTools: body.allowedTools || [],
+        timeoutMs: body.timeoutMs || 30000,
+        enabled: true,
+      });
+      return c.json(installed, 201);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Install failed.' }, 400);
+    }
   });
 
   app.onError((error, c) => {

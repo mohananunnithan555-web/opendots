@@ -23,7 +23,10 @@ export async function api<T>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const normalizedPath = path.startsWith('/api')
+    ? path
+    : `/api${path.startsWith('/') ? '' : '/'}${path}`;
+  const response = await fetch(normalizedPath, {
     method,
     signal,
     headers: {

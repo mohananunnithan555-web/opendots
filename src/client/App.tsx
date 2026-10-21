@@ -24,6 +24,9 @@ import {
   Trash2,
   X,
   Zap,
+  Target,
+  ShieldAlert,
+  Plug,
 } from 'lucide-react';
 import type {
   Conversation,
@@ -54,6 +57,9 @@ import { MemoryModal } from './MemoryModal';
 import { TaskDashboard } from './TaskDashboard';
 import { SkillModal } from './SkillModal';
 import { ActivityCenter } from './ActivityCenter';
+import { GoalsDashboard } from './GoalsDashboard';
+import { ApprovalCenter } from './ApprovalCenter';
+import { ConnectorsHub } from './ConnectorsHub';
 
 function describeFailure(error: unknown, fallback: string) {
   return {
@@ -69,7 +75,7 @@ export function App() {
   const [selectedDot, setSelectedDot] = useState('');
   const [selectedThread, setSelectedThread] = useState<string>();
   const [view, rawSetView] = useState<
-    'chat' | 'tasks' | 'memories' | 'space' | 'activity'
+    'chat' | 'tasks' | 'goals' | 'approvals' | 'connectors' | 'memories' | 'space' | 'activity'
   >('chat');
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
   const [skillModalOpen, setSkillModalOpen] = useState(false);
@@ -482,6 +488,36 @@ export function App() {
         )}
         <div className="sidebar-bottom">
           <button
+            className={`nav-item ${view === 'goals' ? 'active' : ''}`}
+            onClick={() => {
+              setView('goals');
+              setMobile(false);
+            }}
+          >
+            <Target size={17} />
+            <span>Goals & Milestones</span>
+          </button>
+          <button
+            className={`nav-item ${view === 'approvals' ? 'active' : ''}`}
+            onClick={() => {
+              setView('approvals');
+              setMobile(false);
+            }}
+          >
+            <ShieldAlert size={17} />
+            <span>Approval Center</span>
+          </button>
+          <button
+            className={`nav-item ${view === 'connectors' ? 'active' : ''}`}
+            onClick={() => {
+              setView('connectors');
+              setMobile(false);
+            }}
+          >
+            <Plug size={17} />
+            <span>Connectors & Apps</span>
+          </button>
+          <button
             className={`nav-item ${view === 'activity' ? 'active' : ''}`}
             onClick={() => {
               setView('activity');
@@ -804,11 +840,23 @@ export function App() {
                 <h1>
                   {view === 'memories'
                     ? 'Memories'
+                    : view === 'goals'
+                    ? 'Goals & Milestones'
+                    : view === 'approvals'
+                    ? 'Approval Center'
+                    : view === 'connectors'
+                    ? 'Connected Apps'
                     : 'A little follow-through.'}
                 </h1>
                 <p>
                   {view === 'memories'
                     ? 'Preferences you choose to share with your Dots.'
+                    : view === 'goals'
+                    ? 'Track long-term milestones, deadlines, and receive proactive advice.'
+                    : view === 'approvals'
+                    ? 'Inspect, approve, or reject sensitive external operations and financial actions.'
+                    : view === 'connectors'
+                    ? 'Manage your Google, Instagram, Telegram, WhatsApp, and Slack integrations.'
                     : 'Scheduled turns run on the server in their original conversation.'}
                 </p>
               </div>
@@ -834,6 +882,22 @@ export function App() {
             </div>
             {view === 'activity' ? (
               <ActivityCenter />
+            ) : view === 'goals' ? (
+              <GoalsDashboard
+                onExecuteTask={(promptText) => {
+                  setView('chat');
+                  const textarea = document.querySelector('textarea');
+                  if (textarea) {
+                    textarea.value = promptText;
+                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                    textarea.focus();
+                  }
+                }}
+              />
+            ) : view === 'approvals' ? (
+              <ApprovalCenter />
+            ) : view === 'connectors' ? (
+              <ConnectorsHub />
             ) : view === 'memories' ? (
               <>
                 <div className="memory-grid">

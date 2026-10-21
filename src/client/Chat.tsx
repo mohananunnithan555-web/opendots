@@ -126,8 +126,10 @@ export function Chat({
       }
       setImageModalOpen(true);
     };
-    window.addEventListener('opendots:open-image-studio', handleOpenStudio);
-    return () => window.removeEventListener('opendots:open-image-studio', handleOpenStudio);
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('opendots:open-image-studio', handleOpenStudio);
+      return () => window.removeEventListener('opendots:open-image-studio', handleOpenStudio);
+    }
   }, []);
   const onVoiceTurn = useCallback(
     async (text: string): Promise<string> => {

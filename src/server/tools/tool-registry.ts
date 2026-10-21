@@ -8,6 +8,10 @@ import type {
 import { calculatorTool } from './builtin/calculator.js';
 import { textAnalyzerTool } from './builtin/text-analyzer.js';
 import { webReaderTool } from './builtin/web-reader.js';
+import { shoppingResearchTool } from './builtin/shopping-research.js';
+import { instagramResearchTool } from './builtin/instagram-research.js';
+import { executionReportTool } from './builtin/execution-report.js';
+import { stepVerifierTool } from './builtin/step-verifier.js';
 import { deepResearchTool } from '../research/research-tool.js';
 import { delegateToSpecialistTool } from '../specialists/specialist-tools.js';
 import {
@@ -83,6 +87,10 @@ export const globalToolRegistry = new ToolRegistry();
 globalToolRegistry.register(calculatorTool);
 globalToolRegistry.register(textAnalyzerTool);
 globalToolRegistry.register(webReaderTool);
+globalToolRegistry.register(shoppingResearchTool);
+globalToolRegistry.register(instagramResearchTool);
+globalToolRegistry.register(executionReportTool);
+globalToolRegistry.register(stepVerifierTool);
 globalToolRegistry.register(deepResearchTool);
 globalToolRegistry.register(delegateToSpecialistTool);
 globalToolRegistry.register(readWorkspaceFileTool);

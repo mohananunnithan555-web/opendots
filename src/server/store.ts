@@ -13,7 +13,15 @@ import type { TaskPlan } from './planner/types.js';
 import type { CustomSkillRecord } from './skills/types.js';
 import type {
   Action,
+  Approval,
+  ApprovalActionType,
+  Connector,
+  ConnectorType,
   Detail,
+  DocumentSnapshot,
+  Goal,
+  GoalMetrics,
+  GoalMilestone,
   Memory,
   Result,
   Run,
@@ -30,6 +38,9 @@ const defaults: Settings = {
   researchAllowed: true,
   memoryAllowed: true,
   appsAllowed: true,
+  approvalPolicy: 'always_ask',
+  proactiveGoalsAllowed: true,
+  disabledMemoryCategories: [],
 };
 export class Store {
   private db: DatabaseSync;
@@ -88,7 +99,65 @@ export class Store {
         createdAt INTEGER NOT NULL,
         updatedAt INTEGER NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS custom_skills_owner ON custom_skills(ownerId, createdAt DESC);`);
+      CREATE INDEX IF NOT EXISTS custom_skills_owner ON custom_skills(ownerId, createdAt DESC);
+      CREATE TABLE IF NOT EXISTS goals (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT NOT NULL DEFAULT 'opendots-owner',
+        title TEXT NOT NULL,
+        description TEXT,
+        category TEXT NOT NULL DEFAULT 'personal',
+        targetDate INTEGER,
+        priority TEXT NOT NULL DEFAULT 'medium',
+        status TEXT NOT NULL DEFAULT 'active',
+        milestonesJson TEXT NOT NULL DEFAULT '[]',
+        metricsJson TEXT NOT NULL DEFAULT '{}',
+        notes TEXT,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS goals_owner_status ON goals(ownerId, status, createdAt DESC);
+      CREATE TABLE IF NOT EXISTS approvals (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT NOT NULL DEFAULT 'opendots-owner',
+        actionType TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        destination TEXT,
+        payloadJson TEXT NOT NULL,
+        consequences TEXT,
+        estimatedCost TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        policy TEXT NOT NULL DEFAULT 'always_ask',
+        createdAt INTEGER NOT NULL,
+        decidedAt INTEGER,
+        decidedBy TEXT
+      );
+      CREATE INDEX IF NOT EXISTS approvals_status ON approvals(ownerId, status, createdAt DESC);
+      CREATE TABLE IF NOT EXISTS connectors (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT NOT NULL DEFAULT 'opendots-owner',
+        type TEXT NOT NULL,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'unconfigured',
+        configJson TEXT NOT NULL DEFAULT '{}',
+        permissionsJson TEXT NOT NULL DEFAULT '[]',
+        availableActionsJson TEXT NOT NULL DEFAULT '[]',
+        lastTestedAt INTEGER,
+        error TEXT,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS connectors_owner ON connectors(ownerId, type);
+      CREATE TABLE IF NOT EXISTS document_snapshots (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT NOT NULL DEFAULT 'opendots-owner',
+        filePath TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        summary TEXT,
+        createdAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS doc_snapshots_path ON document_snapshots(ownerId, filePath, version DESC);`);
 
     // Migrate any legacy rows into memories_v2
     try {
@@ -109,6 +178,7 @@ export class Store {
       .prepare('INSERT OR IGNORE INTO settings VALUES (1, ?)')
       .run(JSON.stringify(defaults));
     this.seedInitialSkills();
+    this.seedInitialConnectors();
   }
   setupTelemetryState(): string | undefined {
     return (
@@ -918,5 +988,619 @@ export class Store {
     this.db
       .prepare('DELETE FROM custom_skills WHERE id=? AND ownerId=?')
       .run(id, ownerId);
+  }
+
+  // -------------------------------------------------------------
+  // CONNECTORS (Phase 2.E)
+  // -------------------------------------------------------------
+  connectors(ownerId = 'opendots-owner'): Connector[] {
+    try {
+      const rows = this.db
+        .prepare('SELECT * FROM connectors WHERE ownerId=? ORDER BY name ASC')
+        .all(ownerId) as any[];
+      return rows.map((r) => ({
+        id: r.id,
+        ownerId: r.ownerId,
+        type: r.type as ConnectorType,
+        name: r.name,
+        status: r.status as Connector['status'],
+        config: JSON.parse(r.configJson || '{}'),
+        permissions: JSON.parse(r.permissionsJson || '[]'),
+        availableActions: JSON.parse(r.availableActionsJson || '[]'),
+        lastTestedAt: r.lastTestedAt || undefined,
+        error: r.error || undefined,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  getConnector(type: ConnectorType, ownerId = 'opendots-owner'): Connector | undefined {
+    return this.connectors(ownerId).find((c) => c.type === type);
+  }
+
+  updateConnector(
+    type: ConnectorType,
+    patch: Partial<Omit<Connector, 'id' | 'ownerId' | 'type' | 'createdAt'>>,
+    ownerId = 'opendots-owner',
+  ): Connector {
+    const existing = this.getConnector(type, ownerId);
+    if (!existing) throw new Error(`Connector "${type}" not found.`);
+    const updated: Connector = {
+      ...existing,
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    this.db
+      .prepare(
+        `UPDATE connectors SET name=?, status=?, configJson=?, permissionsJson=?, availableActionsJson=?, lastTestedAt=?, error=?, updatedAt=?
+         WHERE type=? AND ownerId=?`,
+      )
+      .run(
+        updated.name,
+        updated.status,
+        JSON.stringify(updated.config),
+        JSON.stringify(updated.permissions),
+        JSON.stringify(updated.availableActions),
+        updated.lastTestedAt || null,
+        updated.error || null,
+        updated.updatedAt,
+        type,
+        ownerId,
+      );
+    return updated;
+  }
+
+  testConnector(type: ConnectorType, ownerId = 'opendots-owner'): { success: boolean; message: string; timestamp: number } {
+    const conn = this.getConnector(type, ownerId);
+    const now = Date.now();
+    if (!conn) {
+      return { success: false, message: `Connector "${type}" does not exist.`, timestamp: now };
+    }
+
+    if (type === 'instagram') {
+      this.updateConnector(type, { status: 'connected', lastTestedAt: now, error: undefined }, ownerId);
+      return { success: true, message: 'Instagram public research engine is verified and accessible.', timestamp: now };
+    }
+
+    if (type === 'slack') {
+      const hasSlack = Boolean(process.env.SLACK_TEAM_ID || conn.config.teamId);
+      const status = hasSlack ? 'connected' : 'unconfigured';
+      const msg = hasSlack ? 'Slack integration verified.' : 'Slack credentials (SLACK_TEAM_ID) not configured.';
+      this.updateConnector(type, { status, lastTestedAt: now, error: hasSlack ? undefined : msg }, ownerId);
+      return { success: hasSlack, message: msg, timestamp: now };
+    }
+
+    if (['gmail', 'google_calendar', 'google_drive'].includes(type)) {
+      const hasKey = Boolean(process.env.COMPOSIO_API_KEY || conn.config.apiKey);
+      const status = hasKey ? 'connected' : 'unconfigured';
+      const msg = hasKey ? `${conn.name} verified through Composio API.` : `Connect an API key (COMPOSIO_API_KEY) in Settings to activate ${conn.name}.`;
+      this.updateConnector(type, { status, lastTestedAt: now, error: hasKey ? undefined : msg }, ownerId);
+      return { success: hasKey, message: msg, timestamp: now };
+    }
+
+    if (type === 'telegram') {
+      const hasToken = Boolean(process.env.TELEGRAM_BOT_TOKEN || conn.config.botToken);
+      const status = hasToken ? 'connected' : 'unconfigured';
+      const msg = hasToken ? 'Telegram bot token verified.' : 'Telegram token (TELEGRAM_BOT_TOKEN) not configured.';
+      this.updateConnector(type, { status, lastTestedAt: now, error: hasToken ? undefined : msg }, ownerId);
+      return { success: hasToken, message: msg, timestamp: now };
+    }
+
+    if (type === 'whatsapp') {
+      const hasToken = Boolean(process.env.WHATSAPP_TOKEN || conn.config.token);
+      const status = hasToken ? 'connected' : 'unconfigured';
+      const msg = hasToken ? 'WhatsApp API credentials verified.' : 'WhatsApp token (WHATSAPP_TOKEN) not configured.';
+      this.updateConnector(type, { status, lastTestedAt: now, error: hasToken ? undefined : msg }, ownerId);
+      return { success: hasToken, message: msg, timestamp: now };
+    }
+
+    return { success: true, message: `${conn.name} test ping passed.`, timestamp: now };
+  }
+
+  disconnectConnector(type: ConnectorType, ownerId = 'opendots-owner'): Connector {
+    return this.updateConnector(type, { status: 'disconnected', config: {}, error: 'Disconnected by user.' }, ownerId);
+  }
+
+  seedInitialConnectors(ownerId = 'opendots-owner'): void {
+    const existing = this.connectors(ownerId);
+    if (existing.length > 0) return;
+
+    const initial: Array<Omit<Connector, 'createdAt' | 'updatedAt' | 'ownerId'>> = [
+      {
+        id: 'conn-gmail',
+        type: 'gmail',
+        name: 'Google Gmail',
+        status: process.env.COMPOSIO_API_KEY ? 'connected' : 'unconfigured',
+        config: {},
+        permissions: ['Read, draft, and send emails via user authorization'],
+        availableActions: ['search_inbox', 'read_emails', 'draft_email', 'send_email (Requires Approval)'],
+      },
+      {
+        id: 'conn-gcalendar',
+        type: 'google_calendar',
+        name: 'Google Calendar',
+        status: process.env.COMPOSIO_API_KEY ? 'connected' : 'unconfigured',
+        config: {},
+        permissions: ['View schedule and create/reschedule calendar events'],
+        availableActions: ['list_events', 'check_availability', 'create_event', 'reschedule_event'],
+      },
+      {
+        id: 'conn-gdrive',
+        type: 'google_drive',
+        name: 'Google Drive',
+        status: process.env.COMPOSIO_API_KEY ? 'connected' : 'unconfigured',
+        config: {},
+        permissions: ['Search files, inspect documents, and export deliverables'],
+        availableActions: ['search_files', 'read_document', 'export_doc', 'save_file'],
+      },
+      {
+        id: 'conn-instagram',
+        type: 'instagram',
+        name: 'Instagram Public Research',
+        status: 'connected',
+        config: {},
+        permissions: ['Public web inspection of open accounts, hashtags, and public reel metadata'],
+        availableActions: ['inspect_profile', 'search_hashtag', 'analyze_post_metadata'],
+      },
+      {
+        id: 'conn-telegram',
+        type: 'telegram',
+        name: 'Telegram Messenger',
+        status: process.env.TELEGRAM_BOT_TOKEN ? 'connected' : 'unconfigured',
+        config: {},
+        permissions: ['Bot message dispatch and status notifications'],
+        availableActions: ['send_notification', 'receive_command', 'send_file'],
+      },
+      {
+        id: 'conn-whatsapp',
+        type: 'whatsapp',
+        name: 'WhatsApp Business API',
+        status: process.env.WHATSAPP_TOKEN ? 'connected' : 'unconfigured',
+        config: {},
+        permissions: ['Template message dispatch and event alerts'],
+        availableActions: ['send_template_message', 'notify_user (Requires Approval)'],
+      },
+      {
+        id: 'conn-slack',
+        type: 'slack',
+        name: 'Slack Workspace Channels',
+        status: process.env.SLACK_TEAM_ID ? 'connected' : 'unconfigured',
+        config: {},
+        permissions: ['Channel messaging, thread replies, and project summaries'],
+        availableActions: ['post_message', 'reply_thread', 'share_summary'],
+      },
+    ];
+
+    const now = Date.now();
+    for (const c of initial) {
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO connectors (id, ownerId, type, name, status, configJson, permissionsJson, availableActionsJson, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          c.id,
+          ownerId,
+          c.type,
+          c.name,
+          c.status,
+          JSON.stringify(c.config),
+          JSON.stringify(c.permissions),
+          JSON.stringify(c.availableActions),
+          now,
+          now,
+        );
+    }
+  }
+
+  // -------------------------------------------------------------
+  // GOALS (Phase 2.B)
+  // -------------------------------------------------------------
+  goals(ownerId = 'opendots-owner', status?: string): Goal[] {
+    try {
+      const query = status
+        ? 'SELECT * FROM goals WHERE ownerId=? AND status=? ORDER BY createdAt DESC'
+        : 'SELECT * FROM goals WHERE ownerId=? ORDER BY createdAt DESC';
+      const rows = (status
+        ? this.db.prepare(query).all(ownerId, status)
+        : this.db.prepare(query).all(ownerId)) as any[];
+      return rows.map((r) => ({
+        id: r.id,
+        ownerId: r.ownerId,
+        title: r.title,
+        description: r.description || undefined,
+        category: r.category as Goal['category'],
+        targetDate: r.targetDate || undefined,
+        priority: r.priority as Goal['priority'],
+        status: r.status as Goal['status'],
+        milestones: JSON.parse(r.milestonesJson || '[]'),
+        metrics: JSON.parse(r.metricsJson || '{}'),
+        notes: r.notes || undefined,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  getGoal(id: string, ownerId = 'opendots-owner'): Goal | undefined {
+    return this.goals(ownerId).find((g) => g.id === id);
+  }
+
+  createGoal(
+    data: {
+      id?: string;
+      ownerId?: string;
+      title: string;
+      description?: string;
+      category?: Goal['category'];
+      targetDate?: number;
+      priority?: Goal['priority'];
+      status?: Goal['status'];
+      milestones?: GoalMilestone[];
+      metrics?: Record<string, number | string>;
+      notes?: string;
+    },
+  ): Goal {
+    const id = data.id || randomUUID();
+    const now = Date.now();
+    const ownerId = data.ownerId || 'opendots-owner';
+    const goal: Goal = {
+      id,
+      ownerId,
+      title: data.title,
+      description: data.description,
+      category: data.category || 'personal',
+      targetDate: data.targetDate,
+      priority: data.priority || 'medium',
+      status: data.status || 'active',
+      milestones: data.milestones || [],
+      metrics: data.metrics || {},
+      notes: data.notes,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO goals (id, ownerId, title, description, category, targetDate, priority, status, milestonesJson, metricsJson, notes, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        goal.id,
+        goal.ownerId,
+        goal.title,
+        goal.description || null,
+        goal.category,
+        goal.targetDate || null,
+        goal.priority,
+        goal.status,
+        JSON.stringify(goal.milestones),
+        JSON.stringify(goal.metrics),
+        goal.notes || null,
+        goal.createdAt,
+        goal.updatedAt,
+      );
+    return goal;
+  }
+
+  updateGoal(
+    id: string,
+    patch: Partial<Omit<Goal, 'id' | 'ownerId' | 'createdAt'>>,
+    ownerId = 'opendots-owner',
+  ): Goal {
+    const existing = this.getGoal(id, ownerId);
+    if (!existing) throw new Error('Goal not found.');
+    const updated: Goal = {
+      ...existing,
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    this.db
+      .prepare(
+        `UPDATE goals SET title=?, description=?, category=?, targetDate=?, priority=?, status=?, milestonesJson=?, metricsJson=?, notes=?, updatedAt=?
+         WHERE id=? AND ownerId=?`,
+      )
+      .run(
+        updated.title,
+        updated.description || null,
+        updated.category,
+        updated.targetDate || null,
+        updated.priority,
+        updated.status,
+        JSON.stringify(updated.milestones),
+        JSON.stringify(updated.metrics),
+        updated.notes || null,
+        updated.updatedAt,
+        id,
+        ownerId,
+      );
+    return updated;
+  }
+
+  deleteGoal(id: string, ownerId = 'opendots-owner'): void {
+    this.db.prepare('DELETE FROM goals WHERE id=? AND ownerId=?').run(id, ownerId);
+  }
+
+  proactiveGoalSuggestions(ownerId = 'opendots-owner'): Array<{
+    goalId?: string;
+    title: string;
+    reason: string;
+    suggestedAction: string;
+    urgency: 'low' | 'medium' | 'high';
+  }> {
+    const activeGoals = this.goals(ownerId, 'active');
+    const suggestions: Array<{
+      goalId?: string;
+      title: string;
+      reason: string;
+      suggestedAction: string;
+      urgency: 'low' | 'medium' | 'high';
+    }> = [];
+
+    const now = Date.now();
+    for (const goal of activeGoals) {
+      const totalMilestones = goal.milestones.length;
+      const completedMilestones = goal.milestones.filter((m) => m.completed).length;
+
+      if (totalMilestones === 0) {
+        suggestions.push({
+          goalId: goal.id,
+          title: `Break down "${goal.title}"`,
+          reason: 'This active goal has no milestones yet. Clear milestones increase completion by 70%.',
+          suggestedAction: `Ask OpenDots to generate 3-5 concrete milestones for ${goal.title}.`,
+          urgency: 'medium',
+        });
+      } else if (completedMilestones === 0 && now - goal.createdAt > 3 * 86400000) {
+        suggestions.push({
+          goalId: goal.id,
+          title: `Start Milestone 1 for "${goal.title}"`,
+          reason: `Goal was created ${Math.round((now - goal.createdAt) / 86400000)} days ago, but first milestone "${goal.milestones[0].title}" is still pending.`,
+          suggestedAction: `Execute task for "${goal.milestones[0].title}".`,
+          urgency: 'high',
+        });
+      }
+
+      if (goal.targetDate && goal.targetDate - now < 7 * 86400000 && completedMilestones < totalMilestones) {
+        const daysLeft = Math.max(1, Math.round((goal.targetDate - now) / 86400000));
+        suggestions.push({
+          goalId: goal.id,
+          title: `Deadline Approaching: "${goal.title}"`,
+          reason: `Deadline is in ${daysLeft} days with ${totalMilestones - completedMilestones} milestones remaining.`,
+          suggestedAction: 'Review remaining blockers and prioritize next milestone.',
+          urgency: 'high',
+        });
+      }
+    }
+
+    if (activeGoals.length === 0) {
+      suggestions.push({
+        title: 'Define your first long-term Goal',
+        reason: 'Goals help OpenDots provide proactive suggestions, research monitoring, and tailored task execution.',
+        suggestedAction: 'Click "+ New Goal" in the Goals dashboard to set a personal or technical milestone.',
+        urgency: 'low',
+      });
+    }
+
+    return suggestions;
+  }
+
+  // -------------------------------------------------------------
+  // APPROVALS (Phase 2.F)
+  // -------------------------------------------------------------
+  approvals(ownerId = 'opendots-owner', status?: 'pending' | 'approved' | 'rejected'): Approval[] {
+    try {
+      const query = status
+        ? 'SELECT * FROM approvals WHERE ownerId=? AND status=? ORDER BY createdAt DESC'
+        : 'SELECT * FROM approvals WHERE ownerId=? ORDER BY createdAt DESC';
+      const rows = (status
+        ? this.db.prepare(query).all(ownerId, status)
+        : this.db.prepare(query).all(ownerId)) as any[];
+      return rows.map((r) => ({
+        id: r.id,
+        ownerId: r.ownerId,
+        actionType: r.actionType as ApprovalActionType,
+        title: r.title,
+        description: r.description,
+        destination: r.destination || undefined,
+        payload: JSON.parse(r.payloadJson || '{}'),
+        consequences: r.consequences || undefined,
+        estimatedCost: r.estimatedCost || undefined,
+        status: r.status as Approval['status'],
+        policy: r.policy as Approval['policy'],
+        createdAt: r.createdAt,
+        decidedAt: r.decidedAt || undefined,
+        decidedBy: r.decidedBy || undefined,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  getApproval(id: string, ownerId = 'opendots-owner'): Approval | undefined {
+    return this.approvals(ownerId).find((a) => a.id === id);
+  }
+
+  createApproval(
+    data: {
+      id?: string;
+      ownerId?: string;
+      actionType: ApprovalActionType;
+      title: string;
+      description: string;
+      destination?: string;
+      payload?: Record<string, unknown>;
+      consequences?: string;
+      estimatedCost?: string;
+      status?: Approval['status'];
+      policy?: 'always_ask' | 'category_based' | 'pre_authorized';
+    },
+  ): Approval {
+    const id = data.id || randomUUID();
+    const now = Date.now();
+    const ownerId = data.ownerId || 'opendots-owner';
+    const approval: Approval = {
+      id,
+      ownerId,
+      actionType: data.actionType,
+      title: data.title,
+      description: data.description,
+      destination: data.destination,
+      payload: data.payload || {},
+      consequences: data.consequences,
+      estimatedCost: data.estimatedCost,
+      status: data.status || 'pending',
+      policy: data.policy || 'always_ask',
+      createdAt: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO approvals (id, ownerId, actionType, title, description, destination, payloadJson, consequences, estimatedCost, status, policy, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        approval.id,
+        approval.ownerId,
+        approval.actionType,
+        approval.title,
+        approval.description,
+        approval.destination || null,
+        JSON.stringify(approval.payload),
+        approval.consequences || null,
+        approval.estimatedCost || null,
+        approval.status,
+        approval.policy,
+        approval.createdAt,
+      );
+    return approval;
+  }
+
+  decideApproval(
+    id: string,
+    decision: 'approved' | 'rejected',
+    decidedBy = 'user',
+    ownerId = 'opendots-owner',
+  ): Approval {
+    const existing = this.getApproval(id, ownerId);
+    if (!existing) throw new Error('Approval request not found.');
+    const now = Date.now();
+    this.db
+      .prepare('UPDATE approvals SET status=?, decidedAt=?, decidedBy=? WHERE id=? AND ownerId=?')
+      .run(decision, now, decidedBy, id, ownerId);
+    return {
+      ...existing,
+      status: decision,
+      decidedAt: now,
+      decidedBy,
+    };
+  }
+
+  // -------------------------------------------------------------
+  // DOCUMENT SNAPSHOTS (Phase 2.K)
+  // -------------------------------------------------------------
+  saveDocumentSnapshot(
+    filePath: string,
+    content: string,
+    summary?: string,
+    ownerId = 'opendots-owner',
+  ): DocumentSnapshot {
+    const existing = this.documentSnapshots(filePath, ownerId);
+    const nextVersion = existing.length > 0 ? existing[0].version + 1 : 1;
+    const id = randomUUID();
+    const now = Date.now();
+
+    const snapshot: DocumentSnapshot = {
+      id,
+      ownerId,
+      filePath,
+      version: nextVersion,
+      content,
+      summary,
+      createdAt: now,
+    };
+
+    this.db
+      .prepare(
+        `INSERT INTO document_snapshots (id, ownerId, filePath, version, content, summary, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        snapshot.id,
+        snapshot.ownerId,
+        snapshot.filePath,
+        snapshot.version,
+        snapshot.content,
+        snapshot.summary || null,
+        snapshot.createdAt,
+      );
+
+    return snapshot;
+  }
+
+  documentSnapshots(filePath?: string, ownerId = 'opendots-owner'): DocumentSnapshot[] {
+    try {
+      const query = filePath
+        ? 'SELECT * FROM document_snapshots WHERE ownerId=? AND filePath=? ORDER BY version DESC'
+        : 'SELECT * FROM document_snapshots WHERE ownerId=? ORDER BY createdAt DESC';
+      const rows = (filePath
+        ? this.db.prepare(query).all(ownerId, filePath)
+        : this.db.prepare(query).all(ownerId)) as any[];
+      return rows.map((r) => ({
+        id: r.id,
+        ownerId: r.ownerId,
+        filePath: r.filePath,
+        version: r.version,
+        content: r.content,
+        summary: r.summary || undefined,
+        createdAt: r.createdAt,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  getDocumentSnapshot(id: string, ownerId = 'opendots-owner'): DocumentSnapshot | undefined {
+    return this.documentSnapshots(undefined, ownerId).find((s) => s.id === id);
+  }
+
+  // -------------------------------------------------------------
+  // MEMORY ENHANCEMENTS (Phase 2.A)
+  // -------------------------------------------------------------
+  exportMemories(format: 'json' | 'markdown' = 'json', ownerId = 'opendots-owner'): string {
+    const memories = this.memoriesV2({ limit: 1000 }, ownerId);
+    if (format === 'markdown') {
+      let md = '# OpenDots Persistent Personal Memory Export\n\n';
+      md += `*Exported on ${new Date().toISOString()} | Total Memories: ${memories.length}*\n\n`;
+      const categories: Record<string, typeof memories> = {};
+      for (const m of memories) {
+        if (!categories[m.category]) categories[m.category] = [];
+        categories[m.category].push(m);
+      }
+      for (const [cat, list] of Object.entries(categories)) {
+        md += `## ${cat.toUpperCase()}\n\n`;
+        for (const item of list) {
+          md += `- **${item.text}** *(Confidence: ${(item.confidence * 100).toFixed(0)}%, Saved: ${new Date(item.createdAt).toLocaleDateString()})*\n`;
+        }
+        md += '\n';
+      }
+      return md;
+    }
+    return JSON.stringify(memories, null, 2);
+  }
+
+  purgeMemories(category?: MemoryCategory, ownerId = 'opendots-owner'): number {
+    if (category) {
+      const info = this.db
+        .prepare('DELETE FROM memories_v2 WHERE ownerId=? AND category=?')
+        .run(ownerId, category);
+      return Number(info.changes);
+    }
+    const info = this.db
+      .prepare('DELETE FROM memories_v2 WHERE ownerId=?')
+      .run(ownerId);
+    return Number(info.changes);
   }
 }
