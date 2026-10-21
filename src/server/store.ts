@@ -10,6 +10,7 @@ import {
   type MemoryRecord,
 } from './memory-types.js';
 import type { TaskPlan } from './planner/types.js';
+import type { CustomSkillRecord } from './skills/types.js';
 import type {
   Action,
   Detail,
@@ -71,7 +72,23 @@ export class Store {
         createdAt INTEGER NOT NULL,
         updatedAt INTEGER NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS task_plans_owner ON task_plans(ownerId, createdAt DESC);`);
+      CREATE INDEX IF NOT EXISTS task_plans_owner ON task_plans(ownerId, createdAt DESC);
+      CREATE TABLE IF NOT EXISTS custom_skills (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT NOT NULL DEFAULT 'opendots-owner',
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        version TEXT NOT NULL DEFAULT '1.0.0',
+        instructions TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'utility',
+        requiredPermissionsJson TEXT NOT NULL DEFAULT '["basic"]',
+        allowedToolsJson TEXT NOT NULL DEFAULT '[]',
+        timeoutMs INTEGER NOT NULL DEFAULT 30000,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS custom_skills_owner ON custom_skills(ownerId, createdAt DESC);`);
 
     // Migrate any legacy rows into memories_v2
     try {
@@ -91,6 +108,7 @@ export class Store {
     this.db
       .prepare('INSERT OR IGNORE INTO settings VALUES (1, ?)')
       .run(JSON.stringify(defaults));
+    this.seedInitialSkills();
   }
   setupTelemetryState(): string | undefined {
     return (
@@ -161,14 +179,18 @@ export class Store {
       .prepare('SELECT * FROM tasks WHERE id=?')
       .get(id) as unknown as Task | undefined;
   }
-  createTask(prompt: string, intervalSeconds: number | null = null): Task {
+  createTask(
+    prompt: string,
+    intervalSeconds: number | null = null,
+    nextRunAt: number | null = null,
+  ): Task {
     const now = Date.now();
     const id = randomUUID();
     this.db
       .prepare(
-        "INSERT INTO tasks VALUES (?, ?, 'queued', ?, NULL, ?, ?, NULL, NULL, NULL)",
+        "INSERT INTO tasks VALUES (?, ?, 'queued', ?, ?, ?, ?, NULL, NULL, NULL)",
       )
-      .run(id, prompt, intervalSeconds, now, now);
+      .run(id, prompt, intervalSeconds, nextRunAt ?? null, now, now);
     this.event(id, null, 'Task added to the queue.');
     return this.task(id)!;
   }
@@ -199,6 +221,11 @@ export class Store {
         'INSERT INTO events (taskId, runId, text, createdAt) VALUES (?, ?, ?, ?)',
       )
       .run(taskId, runId, text, Date.now());
+  }
+  recentEvents(limit = 50): TaskEvent[] {
+    return this.db
+      .prepare('SELECT * FROM events ORDER BY id DESC LIMIT ?')
+      .all(limit) as unknown as TaskEvent[];
   }
   private invalidate(task: Task, status: string, reason: string) {
     const now = Date.now();
@@ -285,9 +312,9 @@ export class Store {
         );
       const task = this.db
         .prepare(
-          "SELECT * FROM tasks WHERE status='queued' OR (status='completed' AND nextRunAt IS NOT NULL AND nextRunAt<=?) ORDER BY createdAt LIMIT 1",
+          "SELECT * FROM tasks WHERE (status='queued' AND (nextRunAt IS NULL OR nextRunAt<=?)) OR (status='completed' AND nextRunAt IS NOT NULL AND nextRunAt<=?) ORDER BY createdAt LIMIT 1",
         )
-        .get(now) as unknown as Task | undefined;
+        .get(now, now) as unknown as Task | undefined;
       if (!task) return null;
       const lease = randomUUID();
       this.db
@@ -589,8 +616,12 @@ export class Store {
     return this.memoriesV2({ query, category }, ownerId);
   }
 
-  saveTaskPlan(plan: TaskPlan): TaskPlan {
+  saveTaskPlan(
+    plan: Partial<TaskPlan> & { goal: string; steps: any[] },
+  ): TaskPlan {
     const now = Date.now();
+    const id = plan.id || randomUUID();
+    const ownerId = plan.ownerId || 'opendots-owner';
     this.db
       .prepare(
         `INSERT INTO task_plans (id, ownerId, goal, status, currentStepIndex, stepsJson, finalResult, error, createdAt, updatedAt)
@@ -604,18 +635,18 @@ export class Store {
            updatedAt=excluded.updatedAt`,
       )
       .run(
-        plan.id,
-        plan.ownerId,
+        id,
+        ownerId,
         plan.goal,
-        plan.status,
-        plan.currentStepIndex,
+        plan.status || 'pending',
+        plan.currentStepIndex || 0,
         JSON.stringify(plan.steps),
         plan.finalResult ?? null,
         plan.error ?? null,
         plan.createdAt || now,
         now,
       );
-    return this.getTaskPlan(plan.id, plan.ownerId) ?? plan;
+    return this.getTaskPlan(id, ownerId)!;
   }
 
   getTaskPlan(id: string, ownerId: string = 'opendots-owner'): TaskPlan | undefined {
@@ -692,5 +723,200 @@ export class Store {
           .run(id, ownerId).changes,
       ) > 0
     );
+  }
+
+  seedInitialSkills(ownerId = 'opendots-owner'): void {
+    const existing = this.customSkills(ownerId);
+    if (existing.length > 0) return;
+
+    const initial = [
+      {
+        id: 'research-brief',
+        name: 'Deep Research Brief',
+        description: 'Conduct deep web research and synthesize findings with citations into an executive brief.',
+        version: '1.0.0',
+        instructions: 'Break the topic into key search angles. Use research tools to extract verified claims, cite all source URLs using [1], [2], and highlight consensus vs contradictions.',
+        category: 'research' as const,
+        requiredPermissions: ['basic', 'research'] as any[],
+        allowedTools: ['deep_research', 'read_web_page', 'search_web'],
+        timeoutMs: 60000,
+        enabled: true,
+      },
+      {
+        id: 'code-review',
+        name: 'Security & Quality Code Review',
+        description: 'Inspect code for vulnerabilities, edge cases, memory leaks, performance bottlenecks, and style.',
+        version: '1.0.0',
+        instructions: 'Analyze the provided code thoroughly. Check for SSRF, SQL injection, secrets, unhandled promise rejections, and algorithmic complexity. Provide concrete drop-in fixes.',
+        category: 'coding' as const,
+        requiredPermissions: ['basic', 'code'] as any[],
+        allowedTools: ['calculate', 'analyze_text'],
+        timeoutMs: 30000,
+        enabled: true,
+      },
+      {
+        id: 'document-draft',
+        name: 'Structured Document Drafting',
+        description: 'Draft comprehensive technical specifications, user guides, or project proposals with clear sections.',
+        version: '1.0.0',
+        instructions: 'Generate clear, professional Markdown documents with an executive summary, problem statement, solution architecture, and step-by-step rollout plan.',
+        category: 'generation' as const,
+        requiredPermissions: ['basic', 'files'] as any[],
+        allowedTools: ['write_workspace_file', 'read_workspace_file', 'analyze_text'],
+        timeoutMs: 45000,
+        enabled: true,
+      },
+      {
+        id: 'study-assistant',
+        name: 'Technical Study Assistant',
+        description: 'Explain complex topics using progressive disclosure, analogies, and a generated 3-question self-test.',
+        version: '1.0.0',
+        instructions: 'Explain the subject clearly: 1. Core mental model and intuition; 2. Technical details; 3. Common pitfalls; 4. A 3-question interactive comprehension check with answers.',
+        category: 'utility' as const,
+        requiredPermissions: ['basic'] as any[],
+        allowedTools: ['calculate', 'analyze_text'],
+        timeoutMs: 30000,
+        enabled: true,
+      },
+      {
+        id: 'project-planner',
+        name: 'Engineering Project Planner',
+        description: 'Deconstruct a project goal into sequential phases, milestones, deliverables, and risk mitigations.',
+        version: '1.0.0',
+        instructions: 'Create an actionable project breakdown: Phase deliverables, technical dependencies, estimate ranges, and potential technical risks with fallback options.',
+        category: 'analysis' as const,
+        requiredPermissions: ['basic'] as any[],
+        allowedTools: ['create_autonomous_plan', 'check_plan_status'],
+        timeoutMs: 45000,
+        enabled: true,
+      },
+    ];
+
+    for (const skill of initial) {
+      this.saveCustomSkill({ ...skill, ownerId });
+    }
+  }
+
+  customSkills(ownerId = 'opendots-owner'): CustomSkillRecord[] {
+    try {
+      const rows = this.db
+        .prepare('SELECT * FROM custom_skills WHERE ownerId=? ORDER BY createdAt DESC')
+        .all(ownerId) as any[];
+      return rows.map((r) => ({
+        id: r.id,
+        ownerId: r.ownerId,
+        name: r.name,
+        description: r.description,
+        version: r.version,
+        instructions: r.instructions,
+        category: r.category,
+        requiredPermissions: JSON.parse(r.requiredPermissionsJson || '["basic"]'),
+        allowedTools: JSON.parse(r.allowedToolsJson || '[]'),
+        timeoutMs: r.timeoutMs,
+        enabled: Boolean(r.enabled),
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  saveCustomSkill(
+    skill: Omit<CustomSkillRecord, 'id' | 'createdAt' | 'updatedAt' | 'ownerId'> & {
+      id?: string;
+      ownerId?: string;
+    },
+  ): CustomSkillRecord {
+    const id = skill.id || randomUUID();
+    const now = Date.now();
+    const ownerId = skill.ownerId || 'opendots-owner';
+    const record: CustomSkillRecord = {
+      id,
+      ownerId,
+      name: skill.name,
+      description: skill.description,
+      version: skill.version || '1.0.0',
+      instructions: skill.instructions,
+      category: skill.category || 'utility',
+      requiredPermissions: skill.requiredPermissions || ['basic'],
+      allowedTools: skill.allowedTools || [],
+      timeoutMs: skill.timeoutMs || 30000,
+      enabled: skill.enabled ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO custom_skills (id, ownerId, name, description, version, instructions, category, requiredPermissionsJson, allowedToolsJson, timeoutMs, enabled, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.ownerId,
+        record.name,
+        record.description,
+        record.version,
+        record.instructions,
+        record.category,
+        JSON.stringify(record.requiredPermissions),
+        JSON.stringify(record.allowedTools),
+        record.timeoutMs,
+        record.enabled ? 1 : 0,
+        record.createdAt,
+        record.updatedAt,
+      );
+    return record;
+  }
+
+  updateCustomSkill(
+    id: string,
+    patch: Partial<Omit<CustomSkillRecord, 'id' | 'ownerId' | 'createdAt'>>,
+    ownerId = 'opendots-owner',
+  ): CustomSkillRecord {
+    const existing = this.customSkills(ownerId).find((s) => s.id === id);
+    if (!existing) throw new Error('Skill not found.');
+    const updated: CustomSkillRecord = {
+      ...existing,
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    this.db
+      .prepare(
+        `UPDATE custom_skills SET name=?, description=?, version=?, instructions=?, category=?, requiredPermissionsJson=?, allowedToolsJson=?, timeoutMs=?, enabled=?, updatedAt=?
+         WHERE id=? AND ownerId=?`,
+      )
+      .run(
+        updated.name,
+        updated.description,
+        updated.version,
+        updated.instructions,
+        updated.category,
+        JSON.stringify(updated.requiredPermissions),
+        JSON.stringify(updated.allowedTools),
+        updated.timeoutMs,
+        updated.enabled ? 1 : 0,
+        updated.updatedAt,
+        id,
+        ownerId,
+      );
+    return updated;
+  }
+
+  toggleCustomSkill(
+    id: string,
+    enabled?: boolean,
+    ownerId = 'opendots-owner',
+  ): CustomSkillRecord {
+    const existing = this.customSkills(ownerId).find((s) => s.id === id);
+    if (!existing) throw new Error('Skill not found.');
+    const nextState = enabled !== undefined ? enabled : !existing.enabled;
+    return this.updateCustomSkill(id, { enabled: nextState }, ownerId);
+  }
+
+  deleteCustomSkill(id: string, ownerId = 'opendots-owner'): void {
+    this.db
+      .prepare('DELETE FROM custom_skills WHERE id=? AND ownerId=?')
+      .run(id, ownerId);
   }
 }

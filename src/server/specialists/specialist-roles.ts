@@ -46,4 +46,13 @@ export const SPECIALIST_ROLES: Record<SpecialistRoleType, SpecialistRoleDefiniti
     allowedPermissions: ['basic', 'research', 'code'],
     allowedTools: ['calculate', 'analyze_text', 'deep_research'],
   },
+  reviewer: {
+    role: 'reviewer',
+    name: 'Reviewer Dot',
+    tagline: 'Quality audit, factual verification, security review, and deliverable critique',
+    systemPrompt:
+      'You are the Specialist Reviewer in OpenDots. Your mission is to rigorously review generated documents, code, plans, and research reports. Audit for factual accuracy, missing context, edge cases, security vulnerabilities, prompt-injection risks, and clarity before final user presentation.',
+    allowedPermissions: ['basic', 'research', 'code'],
+    allowedTools: ['analyze_text', 'search_memory'],
+  },
 };

@@ -109,6 +109,7 @@ export function SpaceWorkspace({
           pages={pages}
           onPage={onPage}
           onNew={() => void create(null)}
+          onRefresh={onRefresh}
         />
       ) : page ? (
         <div className="space-writing-layout">

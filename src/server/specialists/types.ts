@@ -5,7 +5,8 @@ export type SpecialistRoleType =
   | 'coder'
   | 'writer'
   | 'planner'
-  | 'analyst';
+  | 'analyst'
+  | 'reviewer';
 
 export interface SpecialistRoleDefinition {
   role: SpecialistRoleType;

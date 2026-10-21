@@ -34,6 +34,10 @@ export class WorkspaceStore {
       ['dots', 'composioSessionId', 'TEXT'],
       ['dots', 'composioPolicyHash', 'TEXT'],
       ['thread_bindings', 'learningContainerId', 'TEXT'],
+      ['spaces', 'goal', 'TEXT'],
+      ['spaces', 'instructions', 'TEXT'],
+      ['spaces', 'status', "TEXT NOT NULL DEFAULT 'active'"],
+      ['spaces', 'archivedAt', 'INTEGER'],
     ]) {
       if (
         !this.db
@@ -125,17 +129,96 @@ export class WorkspaceStore {
       .prepare('SELECT * FROM spaces ORDER BY createdAt')
       .all() as unknown as Space[];
   }
-  createSpace(name: string, description: string): Space {
-    const space = {
+  createSpace(
+    name: string,
+    description: string,
+    goal: string | null = null,
+    instructions: string | null = null,
+  ): Space {
+    const space: Space = {
       id: randomUUID(),
       name,
       description,
+      goal,
+      instructions,
+      status: 'active',
+      archivedAt: null,
       createdAt: Date.now(),
     };
     this.db
-      .prepare('INSERT INTO spaces VALUES (?, ?, ?, ?)')
-      .run(space.id, name, description, space.createdAt);
+      .prepare(
+        'INSERT INTO spaces (id, name, description, createdAt, goal, instructions, status, archivedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        space.id,
+        name,
+        description,
+        space.createdAt,
+        goal,
+        instructions,
+        'active',
+        null,
+      );
     return space;
+  }
+  updateSpace(
+    id: string,
+    patch: {
+      name?: string;
+      description?: string;
+      goal?: string | null;
+      instructions?: string | null;
+      status?: 'active' | 'archived' | 'completed';
+    },
+  ): Space {
+    const space = this.spaces().find((s) => s.id === id);
+    if (!space) throw new Error('Space not found.');
+    const updated: Space = {
+      ...space,
+      name: patch.name ?? space.name,
+      description: patch.description ?? space.description,
+      goal: patch.goal !== undefined ? patch.goal : space.goal,
+      instructions:
+        patch.instructions !== undefined
+          ? patch.instructions
+          : space.instructions,
+      status: patch.status ?? space.status ?? 'active',
+      archivedAt:
+        patch.status === 'archived'
+          ? Date.now()
+          : patch.status
+            ? null
+            : space.archivedAt,
+    };
+    this.db
+      .prepare(
+        'UPDATE spaces SET name=?, description=?, goal=?, instructions=?, status=?, archivedAt=? WHERE id=?',
+      )
+      .run(
+        updated.name,
+        updated.description,
+        updated.goal ?? null,
+        updated.instructions ?? null,
+        updated.status ?? 'active',
+        updated.archivedAt ?? null,
+        id,
+      );
+    return updated;
+  }
+  deleteSpace(id: string): void {
+    if (this.spaces().length <= 1) {
+      throw new Error('Cannot delete the last remaining Space/Project.');
+    }
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('DELETE FROM pages WHERE spaceId=?').run(id);
+      this.db.prepare('DELETE FROM dot_spaces WHERE spaceId=?').run(id);
+      this.db.prepare('DELETE FROM spaces WHERE id=?').run(id);
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
   }
   dots(): Dot[] {
     return this.db

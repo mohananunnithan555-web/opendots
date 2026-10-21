@@ -130,11 +130,11 @@ describe('Modular Skill System (Phase 2)', () => {
 
     const res1 = await registry.execute('math-eval', { expression: '12 * 8 + 4' });
     expect(res1.success).toBe(true);
-    expect(res1.data?.result).toBe(100);
+    expect((res1.data as any)?.result).toBe(100);
 
     const res2 = await registry.execute('math-eval', { expression: 'Math.sqrt(144) + 8' });
     expect(res2.success).toBe(true);
-    expect(res2.data?.result).toBe(20);
+    expect((res2.data as any)?.result).toBe(20);
 
     // Rejects unsafe javascript execution attempts
     const unsafe = await registry.execute('math-eval', {
@@ -152,9 +152,10 @@ describe('Modular Skill System (Phase 2)', () => {
     const result = await registry.execute('text-stats', { text });
 
     expect(result.success).toBe(true);
-    expect(result.data?.words).toBe(12);
-    expect(result.data?.sentences).toBe(3);
-    expect(result.data?.characters).toBeGreaterThan(30);
+    const stats = result.data as any;
+    expect(stats?.words).toBe(12);
+    expect(stats?.sentences).toBe(3);
+    expect(stats?.characters).toBeGreaterThan(30);
   });
 
   it('converts enabled skills to CopilotKit ToolDefinition instances', () => {

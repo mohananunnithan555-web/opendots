@@ -132,7 +132,7 @@ describe('Persistent Categorized Memory (Phase 3)', () => {
     const forgetTool = tools.find((t) => t.name === 'forget_info')!;
 
     // Remember info
-    const remResult: any = await rememberTool.execute({
+    const remResult: any = await (rememberTool.execute as any)({
       text: 'User likes dark roast coffee',
       category: 'preference',
     });
@@ -140,13 +140,13 @@ describe('Persistent Categorized Memory (Phase 3)', () => {
     expect(remResult.message).toContain('Remembered');
 
     // Search memory
-    const searchResult: any = await searchTool.execute({ query: 'coffee' });
+    const searchResult: any = await (searchTool.execute as any)({ query: 'coffee' });
     expect(searchResult.success).toBe(true);
     expect(searchResult.found).toBe(true);
     expect(searchResult.results[0].text).toContain('dark roast coffee');
 
     // Forget info by query
-    const forgetResult: any = await forgetTool.execute({ query: 'coffee' });
+    const forgetResult: any = await (forgetTool.execute as any)({ query: 'coffee' });
     expect(forgetResult.success).toBe(true);
     expect(forgetResult.message).toContain('Forgot 1 memories');
 

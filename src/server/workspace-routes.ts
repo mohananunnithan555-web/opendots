@@ -58,6 +58,8 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       .object({
         name: z.string().trim().min(1).max(60),
         description: z.string().max(500).default(''),
+        goal: z.string().max(500).nullable().optional(),
+        instructions: z.string().max(2000).nullable().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null));
@@ -67,9 +69,78 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         400,
       );
     return c.json(
-      platform.workspace.createSpace(data.data.name, data.data.description),
+      platform.workspace.createSpace(
+        data.data.name,
+        data.data.description,
+        data.data.goal ?? null,
+        data.data.instructions ?? null,
+      ),
       201,
     );
+  });
+  app.patch('/spaces/:id', async (c) => {
+    const id = c.req.param('id');
+    const data = z
+      .object({
+        name: z.string().trim().min(1).max(60).optional(),
+        description: z.string().max(500).optional(),
+        goal: z.string().max(500).nullable().optional(),
+        instructions: z.string().max(2000).nullable().optional(),
+        status: z.enum(['active', 'archived', 'completed']).optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!data.success)
+      return c.json({ error: 'Invalid Space update payload.' }, 400);
+    try {
+      return c.json(platform.workspace.updateSpace(id, data.data));
+    } catch (e) {
+      return c.json(
+        { error: e instanceof Error ? e.message : 'Could not update Space.' },
+        404,
+      );
+    }
+  });
+  app.delete('/spaces/:id', async (c) => {
+    const id = c.req.param('id');
+    try {
+      platform.workspace.deleteSpace(id);
+      return c.json({ ok: true });
+    } catch (e) {
+      return c.json(
+        { error: e instanceof Error ? e.message : 'Could not delete Space.' },
+        400,
+      );
+    }
+  });
+  app.get('/spaces/:id/export', async (c) => {
+    const id = c.req.param('id');
+    const space = platform.workspace.spaces().find((s) => s.id === id);
+    if (!space) return c.json({ error: 'Space not found.' }, 404);
+    const pages = platform.workspace.pages.list(id);
+    const fullPages = pages.map((p) =>
+      platform.workspace.pages.get(id, p.id),
+    );
+    const markdownBundle = [
+      `# Project Deliverable: ${space.name}`,
+      space.description ? `\n> ${space.description}` : '',
+      space.goal ? `\n**Goal:** ${space.goal}` : '',
+      `\n**Status:** ${space.status ?? 'active'} | **Exported:** ${new Date().toISOString()}`,
+      '\n---\n',
+      ...fullPages.map(
+        (page) =>
+          `## ${page.title}\n\n*Created: ${new Date(page.createdAt).toLocaleDateString()} | Updated: ${new Date(page.updatedAt).toLocaleDateString()}*\n\n${page.content}\n\n---`,
+      ),
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    return c.json({
+      space,
+      pageCount: fullPages.length,
+      markdown: markdownBundle,
+      pages: fullPages,
+    });
   });
   app.post('/dots', async (c) => {
     const data = dotSchema

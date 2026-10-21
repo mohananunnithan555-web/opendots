@@ -6,9 +6,9 @@ import { executeSafeTool } from '../src/server/tools/open-dots-tool.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
 
 describe('Specialist AI Agents (Phase 7)', () => {
-  it('defines the 5 canonical specialist roles with bounded tools and permissions', () => {
+  it('defines the canonical specialist roles with bounded tools and permissions', () => {
     const roles = Object.keys(SPECIALIST_ROLES);
-    expect(roles).toEqual(['researcher', 'coder', 'writer', 'planner', 'analyst']);
+    expect(roles).toEqual(['researcher', 'coder', 'writer', 'planner', 'analyst', 'reviewer']);
 
     const researcher = SPECIALIST_ROLES.researcher;
     expect(researcher.name).toBe('Researcher Dot');
@@ -29,6 +29,10 @@ describe('Specialist AI Agents (Phase 7)', () => {
     const analyst = SPECIALIST_ROLES.analyst;
     expect(analyst.name).toBe('Analyst Dot');
     expect(analyst.allowedTools).toContain('calculate');
+
+    const reviewer = SPECIALIST_ROLES.reviewer;
+    expect(reviewer.name).toBe('Reviewer Dot');
+    expect(reviewer.allowedPermissions).toContain('basic');
   });
 
   it('coordinator accurately routes tasks to the appropriate specialist', () => {

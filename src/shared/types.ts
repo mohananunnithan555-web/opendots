@@ -75,6 +75,10 @@ export interface Space {
   name: string;
   description: string;
   createdAt: number;
+  goal?: string | null;
+  instructions?: string | null;
+  status?: 'active' | 'archived' | 'completed';
+  archivedAt?: number | null;
 }
 export interface Dot {
   id: string;

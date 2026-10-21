@@ -2,7 +2,7 @@ import { computerRoutes } from './computer-routes.js';
 import { connectionRoutes } from './connection-routes.js';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { Store } from './store.js';
 import { Runner } from './runner.js';
@@ -11,6 +11,7 @@ import type { Platform } from './platform.js';
 import { VoiceService } from './voice.js';
 import { workspaceRoutes } from './workspace-routes.js';
 import { TaskPlanner } from './planner/task-planner.js';
+import { globalSkillRegistry } from './skills/index.js';
 const interval = z.number().int().min(60).max(31_536_000).nullable();
 export interface AppOptions {
   store: Store;
@@ -156,6 +157,124 @@ export function createApp({
     if (platform && parsed.data.threadId)
       platform.workspace.bindTask(task.id, parsed.data.threadId);
     return c.json(task, 201);
+  });
+  app.post('/api/cloud-tasks', async (c) => {
+    const parsed = z
+      .object({
+        prompt: z.string().trim().min(3).max(4000),
+        intervalSeconds: interval.optional(),
+        delaySeconds: z.number().int().min(0).max(86400 * 365).optional(),
+        timezone: z.string().optional(),
+        dotId: z.string().optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json(
+        { error: 'Provide a task prompt between 3 and 4,000 characters.' },
+        400,
+      );
+    if (!store.settings().researchAllowed)
+      return c.json({ error: 'Research is disabled in Settings.' }, 403);
+
+    const nextRunAt = parsed.data.delaySeconds
+      ? Date.now() + parsed.data.delaySeconds * 1000
+      : Date.now();
+
+    const task = store.createTask(
+      parsed.data.prompt,
+      parsed.data.intervalSeconds ?? null,
+      nextRunAt,
+    );
+
+    let threadId: string | undefined;
+    if (platform) {
+      const dotId = parsed.data.dotId || platform.workspace.dots()[0]?.id;
+      if (dotId) {
+        const thread = platform.workspace.bindThread(
+          randomUUID(),
+          dotId,
+          `Cloud Task: ${parsed.data.prompt.slice(0, 36)}...`,
+        );
+        threadId = thread.id;
+        platform.workspace.bindTask(task.id, thread.id);
+      }
+    }
+
+    return c.json(
+      {
+        task,
+        threadId,
+        timezone: parsed.data.timezone ?? 'UTC',
+        status: 'queued',
+        message: 'Task successfully queued for background cloud execution.',
+      },
+      201,
+    );
+  });
+  app.get('/api/cloud-tasks', (c) => {
+    const tasks = store.tasks();
+    const details = tasks.map((task) => {
+      const detail = store.detail(task.id);
+      const threadId = platform?.workspace.taskThread(task.id);
+      return {
+        ...task,
+        threadId,
+        runs: detail?.runs ?? [],
+        events: detail?.events ?? [],
+      };
+    });
+    return c.json(details);
+  });
+  app.get('/api/activity', (c) => {
+    const limit = Math.min(Number(c.req.query('limit') || 60), 200);
+    const events = store.recentEvents(limit);
+    const plans = store.listTaskPlans();
+    const memories = store.memoriesV2({ limit: 30 });
+
+    const feed: Array<{
+      id: string;
+      type: 'task' | 'plan' | 'memory';
+      title: string;
+      description: string;
+      status?: string;
+      timestamp: number;
+    }> = [];
+
+    for (const event of events) {
+      feed.push({
+        id: `event-${event.id}`,
+        type: 'task',
+        title: `Cloud Event`,
+        description: event.text,
+        timestamp: event.createdAt,
+      });
+    }
+
+    for (const plan of plans) {
+      const completed = plan.steps.filter((s) => s.status === 'completed').length;
+      feed.push({
+        id: `plan-${plan.id}`,
+        type: 'plan',
+        title: `Plan: ${plan.goal.slice(0, 48)}${plan.goal.length > 48 ? '...' : ''}`,
+        description: `Status: ${plan.status} (${completed}/${plan.steps.length} steps completed)`,
+        status: plan.status,
+        timestamp: plan.updatedAt || plan.createdAt,
+      });
+    }
+
+    for (const mem of memories) {
+      feed.push({
+        id: `mem-${mem.id}`,
+        type: 'memory',
+        title: `Memory Saved [${mem.category}]`,
+        description: mem.text.slice(0, 80) + (mem.text.length > 80 ? '...' : ''),
+        timestamp: mem.updatedAt || mem.createdAt,
+      });
+    }
+
+    feed.sort((a, b) => b.timestamp - a.timestamp);
+    return c.json(feed.slice(0, limit));
   });
   app.get('/api/tasks/:id', (c) => {
     const detail = store.detail(c.req.param('id'));
@@ -366,6 +485,137 @@ export function createApp({
     return store.deleteTaskPlan(c.req.param('id'))
       ? c.json({ ok: true })
       : c.json({ error: 'Plan not found.' }, 404);
+  });
+
+  app.get('/api/skills', (c) => {
+    const builtinSkills = globalSkillRegistry.list();
+    const custom = store.customSkills();
+    return c.json({
+      builtin: builtinSkills,
+      custom,
+    });
+  });
+
+  app.post('/api/skills', async (c) => {
+    const parsed = z
+      .object({
+        name: z.string().trim().min(1).max(80),
+        description: z.string().trim().min(1).max(500),
+        version: z.string().trim().default('1.0.0'),
+        instructions: z.string().trim().min(1).max(5000),
+        category: z
+          .enum(['analysis', 'utility', 'generation', 'research', 'coding'])
+          .default('utility'),
+        requiredPermissions: z
+          .array(
+            z.enum([
+              'basic',
+              'research',
+              'files',
+              'media',
+              'code',
+              'computer',
+              'admin',
+            ]),
+          )
+          .default(['basic']),
+        allowedTools: z.array(z.string()).default([]),
+        timeoutMs: z.number().int().min(1000).max(300000).default(30000),
+        enabled: z.boolean().default(true),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json(
+        { error: 'Invalid skill data. Please provide name, description, and instructions.' },
+        400,
+      );
+    try {
+      const created = store.saveCustomSkill(parsed.data);
+      return c.json(created, 201);
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : 'Could not save skill.' },
+        400,
+      );
+    }
+  });
+
+  app.put('/api/skills/:id', async (c) => {
+    const id = c.req.param('id');
+    const parsed = z
+      .object({
+        name: z.string().trim().min(1).max(80).optional(),
+        description: z.string().trim().min(1).max(500).optional(),
+        version: z.string().trim().optional(),
+        instructions: z.string().trim().min(1).max(5000).optional(),
+        category: z
+          .enum(['analysis', 'utility', 'generation', 'research', 'coding'])
+          .optional(),
+        requiredPermissions: z
+          .array(
+            z.enum([
+              'basic',
+              'research',
+              'files',
+              'media',
+              'code',
+              'computer',
+              'admin',
+            ]),
+          )
+          .optional(),
+        allowedTools: z.array(z.string()).optional(),
+        timeoutMs: z.number().int().min(1000).max(300000).optional(),
+        enabled: z.boolean().optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json({ error: 'Invalid skill update data.' }, 400);
+    try {
+      const updated = store.updateCustomSkill(id, parsed.data);
+      return c.json(updated);
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : 'Could not update skill.' },
+        404,
+      );
+    }
+  });
+
+  app.post('/api/skills/:id/toggle', async (c) => {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const updated = store.toggleCustomSkill(id, body?.enabled);
+      return c.json(updated);
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : 'Could not toggle skill.' },
+        404,
+      );
+    }
+  });
+
+  app.post('/api/skills/:id/duplicate', (c) => {
+    const id = c.req.param('id');
+    const skill = store.customSkills().find((s) => s.id === id);
+    if (!skill) return c.json({ error: 'Skill not found.' }, 404);
+    const duplicated = store.saveCustomSkill({
+      ...skill,
+      name: `${skill.name} (Copy)`,
+      description: skill.description,
+      instructions: skill.instructions,
+      id: undefined,
+    });
+    return c.json(duplicated, 201);
+  });
+
+  app.delete('/api/skills/:id', (c) => {
+    const id = c.req.param('id');
+    store.deleteCustomSkill(id);
+    return c.json({ ok: true });
   });
 
   app.onError((error, c) => {

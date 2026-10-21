@@ -533,7 +533,7 @@ export function useVoice(
       setStatus('idle');
       setError(e instanceof Error ? e.message : 'Could not connect the call.');
     } finally {
-      if (attempt === generation.current && session.current?.mode !== 'browser') {
+      if (attempt === generation.current && (session.current as any)?.mode !== 'browser') {
         connecting.current = false;
       }
     }

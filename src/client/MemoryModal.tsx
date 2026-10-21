@@ -33,8 +33,8 @@ export function MemoryModal({ isOpen, onClose }: MemoryModalProps) {
     try {
       const url =
         selectedCategory === 'all'
-          ? '/api/memories'
-          : `/api/memories?category=${encodeURIComponent(selectedCategory)}`;
+          ? '/memories'
+          : `/memories?category=${encodeURIComponent(selectedCategory)}`;
       const data = await api<MemoryRecord[]>(url);
       setMemories(data);
     } catch (err) {
@@ -52,7 +52,7 @@ export function MemoryModal({ isOpen, onClose }: MemoryModalProps) {
 
   const handleDelete = async (id: string) => {
     try {
-      await api(`/api/memories/${id}`, { method: 'DELETE' });
+      await api(`/memories/${id}`, 'DELETE');
       setMemories((prev) => prev.filter((m) => m.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete memory.');
@@ -63,13 +63,9 @@ export function MemoryModal({ isOpen, onClose }: MemoryModalProps) {
     e.preventDefault();
     if (!newText.trim()) return;
     try {
-      const added = await api<MemoryRecord>('/api/memories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: newText.trim(),
-          category: newCategory,
-        }),
+      const added = await api<MemoryRecord>('/memories', 'POST', {
+        text: newText.trim(),
+        category: newCategory,
       });
       setMemories((prev) => [added, ...prev]);
       setNewText('');

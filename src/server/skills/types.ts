@@ -49,3 +49,19 @@ export interface SkillDefinition<TInput = unknown, TOutput = unknown> {
   timeoutMs?: number;
   execute(input: TInput, ctx: SkillContext): Promise<TOutput>;
 }
+
+export interface CustomSkillRecord {
+  id: string;
+  ownerId: string;
+  name: string;
+  description: string;
+  version: string;
+  instructions: string;
+  category: 'analysis' | 'utility' | 'generation' | 'research' | 'coding';
+  requiredPermissions: SkillPermission[];
+  allowedTools: string[];
+  timeoutMs: number;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}

@@ -4,6 +4,7 @@ import { SpaceWorkspace } from './SpaceWorkspace';
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { CopilotKitProvider } from '@copilotkit/react-core/v2';
 import {
+  Activity,
   ArrowUp,
   ArrowUpRight,
   BookOpen,
@@ -22,6 +23,7 @@ import {
   Settings2,
   Trash2,
   X,
+  Zap,
 } from 'lucide-react';
 import type {
   Conversation,
@@ -50,6 +52,8 @@ import { WorkspaceDialog, type Dialog } from './WorkspaceDialog';
 import { submitComposerOnEnter } from './chat-composer';
 import { MemoryModal } from './MemoryModal';
 import { TaskDashboard } from './TaskDashboard';
+import { SkillModal } from './SkillModal';
+import { ActivityCenter } from './ActivityCenter';
 
 function describeFailure(error: unknown, fallback: string) {
   return {
@@ -64,10 +68,11 @@ export function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>();
   const [selectedDot, setSelectedDot] = useState('');
   const [selectedThread, setSelectedThread] = useState<string>();
-  const [view, rawSetView] = useState<'chat' | 'tasks' | 'memories' | 'space'>(
-    'chat',
-  );
+  const [view, rawSetView] = useState<
+    'chat' | 'tasks' | 'memories' | 'space' | 'activity'
+  >('chat');
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
+  const [skillModalOpen, setSkillModalOpen] = useState(false);
   const [activityTab, setActivityTab] = useState<'plans' | 'scheduled'>('plans');
   const dirtyPage = useRef(false);
   const [spaceId, setSpaceId] = useState('');
@@ -477,6 +482,16 @@ export function App() {
         )}
         <div className="sidebar-bottom">
           <button
+            className={`nav-item ${view === 'activity' ? 'active' : ''}`}
+            onClick={() => {
+              setView('activity');
+              setMobile(false);
+            }}
+          >
+            <Activity size={17} />
+            <span>Activity Center</span>
+          </button>
+          <button
             className={`nav-item ${view === 'tasks' ? 'active' : ''}`}
             onClick={() => {
               setView('tasks');
@@ -499,6 +514,16 @@ export function App() {
             {state.memories.length > 0 && (
               <small>{state.memories.length}</small>
             )}
+          </button>
+          <button
+            className="nav-item"
+            onClick={() => {
+              setSkillModalOpen(true);
+              setMobile(false);
+            }}
+          >
+            <Zap size={17} />
+            <span>Skills & Workflows</span>
           </button>
           <button
             className="nav-item"
@@ -807,7 +832,9 @@ export function App() {
                 </div>
               )}
             </div>
-            {view === 'memories' ? (
+            {view === 'activity' ? (
+              <ActivityCenter />
+            ) : view === 'memories' ? (
               <>
                 <div className="memory-grid">
                   {state.memories.map((memory) => (
@@ -994,6 +1021,10 @@ export function App() {
           setMemoryModalOpen(false);
           void refresh();
         }}
+      />
+      <SkillModal
+        open={skillModalOpen}
+        onClose={() => setSkillModalOpen(false)}
       />
     </div>
   );
