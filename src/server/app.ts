@@ -12,6 +12,12 @@ import { VoiceService } from './voice.js';
 import { workspaceRoutes } from './workspace-routes.js';
 import { TaskPlanner } from './planner/task-planner.js';
 import { globalSkillRegistry } from './skills/index.js';
+import {
+  buildImageGenerationConfig,
+  type ImageQuality,
+  type ImageAspectRatio,
+  type ImageStyle,
+} from './image-config.js';
 const interval = z.number().int().min(60).max(31_536_000).nullable();
 export interface AppOptions {
   store: Store;
@@ -616,6 +622,100 @@ export function createApp({
     const id = c.req.param('id');
     store.deleteCustomSkill(id);
     return c.json({ ok: true });
+  });
+
+  // Image proxy endpoint (enables CORS-safe canvas manipulation & high-res upscaling)
+  app.get('/api/image/proxy', async (c) => {
+    const url = c.req.query('url');
+    if (!url) return c.json({ error: 'Missing url parameter.' }, 400);
+
+    try {
+      const parsed = new URL(url);
+      const allowedHosts = ['image.pollinations.ai', 'pollinations.ai', 'gen.pollinations.ai'];
+      if (!allowedHosts.includes(parsed.hostname)) {
+        return c.json({ error: 'Host not permitted.' }, 403);
+      }
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        return c.json({ error: `Provider returned status ${response.status}.` }, 502);
+      }
+
+      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      const buffer = Buffer.from(await response.arrayBuffer());
+
+      return new Response(buffer, {
+        status: 200,
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=86400',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    } catch {
+      return c.json({ error: 'Failed to proxy image.' }, 500);
+    }
+  });
+
+  // Direct image download endpoint (forces Content-Disposition attachment on all desktop & mobile browsers)
+  app.get('/api/image/download', async (c) => {
+    const url = c.req.query('url');
+    const rawFilename = c.req.query('filename') || 'opendots-image.jpg';
+    const filename = rawFilename.replace(/[^a-zA-Z0-9_.-]/g, '_');
+
+    if (!url) return c.json({ error: 'Missing url parameter.' }, 400);
+
+    try {
+      const parsed = new URL(url);
+      const allowedHosts = ['image.pollinations.ai', 'pollinations.ai', 'gen.pollinations.ai'];
+      if (!allowedHosts.includes(parsed.hostname)) {
+        return c.json({ error: 'Host not permitted.' }, 403);
+      }
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        return c.json({ error: `Provider returned status ${response.status}.` }, 502);
+      }
+
+      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      const buffer = Buffer.from(await response.arrayBuffer());
+
+      return new Response(buffer, {
+        status: 200,
+        headers: {
+          'Content-Type': contentType,
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Cache-Control': 'no-cache',
+        },
+      });
+    } catch {
+      return c.json({ error: 'Download failed.' }, 500);
+    }
+  });
+
+  // Image generation endpoint (used by Image Studio modal)
+  app.post('/api/image/generate', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+    if (!prompt) {
+      return c.json({ error: 'Please enter a visual prompt.' }, 400);
+    }
+
+    const quality = ['standard', 'hd', '4k'].includes(body.quality)
+      ? (body.quality as ImageQuality)
+      : 'standard';
+    const aspectRatio = ['16:9', '1:1', '4:3', '3:4', '9:16'].includes(body.aspectRatio)
+      ? (body.aspectRatio as ImageAspectRatio)
+      : '1:1';
+    const style = typeof body.style === 'string' ? (body.style as ImageStyle) : 'photorealistic';
+
+    const apiKey = process.env.POLLINATIONS_API_KEY?.trim();
+    const result = buildImageGenerationConfig(
+      { prompt, quality, aspectRatio, style },
+      apiKey,
+    );
+
+    return c.json(result);
   });
 
   app.onError((error, c) => {

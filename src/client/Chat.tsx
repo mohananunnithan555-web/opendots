@@ -28,7 +28,9 @@ import {
   PhoneOff,
   Square,
   X,
+  Image as ImageIcon,
 } from 'lucide-react';
+import { ImageModal } from './ImageModal';
 import { getSpeechRecognition } from './speech';
 import {
   ComputerToolCard,
@@ -105,6 +107,28 @@ export function Chat({
   const chatError = error || runError;
   const [loaded, setLoaded] = useState(false);
   const [running, setRunning] = useState(false);
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [imageModalInitial, setImageModalInitial] = useState<{
+    prompt?: string;
+    quality?: 'standard' | 'hd' | '4k';
+    aspectRatio?: '16:9' | '1:1' | '4:3' | '3:4' | '9:16';
+  }>({});
+
+  useEffect(() => {
+    const handleOpenStudio = (e: Event) => {
+      const custom = e as CustomEvent;
+      if (custom.detail) {
+        setImageModalInitial({
+          prompt: custom.detail.prompt,
+          quality: custom.detail.quality,
+          aspectRatio: custom.detail.aspectRatio,
+        });
+      }
+      setImageModalOpen(true);
+    };
+    window.addEventListener('opendots:open-image-studio', handleOpenStudio);
+    return () => window.removeEventListener('opendots:open-image-studio', handleOpenStudio);
+  }, []);
   const onVoiceTurn = useCallback(
     async (text: string): Promise<string> => {
       if (!text.trim() || running || !loaded || !contextReady || paused)
@@ -555,6 +579,18 @@ export function Chat({
           >
             {isDictating ? <MicOff size={19} /> : <Mic size={19} />}
           </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Open AI Image Studio (1080p & 4K)"
+            title="Open AI Image Studio (generate images in 1080p Full HD or 4K with quality controls)"
+            onClick={() => {
+              setImageModalInitial({ prompt: draft });
+              setImageModalOpen(true);
+            }}
+          >
+            <ImageIcon size={19} />
+          </button>
           <textarea
             aria-label="Message your Dot"
             placeholder={`Message ${dot.name}…`}
@@ -594,6 +630,14 @@ export function Chat({
             : 'Text is ready. Voice needs separate server configuration.'}
         </div>
       </form>
+      <ImageModal
+        open={imageModalOpen}
+        onClose={() => setImageModalOpen(false)}
+        initialPrompt={imageModalInitial.prompt}
+        initialQuality={imageModalInitial.quality}
+        initialAspectRatio={imageModalInitial.aspectRatio}
+        onInsertToChat={(md) => void send(md)}
+      />
     </div>
   );
 }
