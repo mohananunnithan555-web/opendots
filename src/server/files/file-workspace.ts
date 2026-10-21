@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { extname, join, normalize, relative, resolve } from 'node:path';
+import { dirname, extname, join, normalize, relative, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { FileInfo, ReadFileResult, WriteFileResult } from './types.js';
 
 const DISALLOWED_EXTENSIONS = new Set([
@@ -19,13 +20,40 @@ const DISALLOWED_EXTENSIONS = new Set([
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 const MAX_READ_CHARS = 50_000;
 
+export function resolveWorkspaceFilesDirectory(customDir?: string): string {
+  if (customDir) return resolve(normalize(customDir));
+  if (process.env.WORKSPACE_FILES_PATH) {
+    return resolve(normalize(process.env.WORKSPACE_FILES_PATH));
+  }
+  const dbPath = process.env.DATABASE_PATH;
+  if (dbPath && dbPath !== ':memory:') {
+    return join(dirname(resolve(dbPath)), 'workspace_files');
+  }
+  return resolve('./data/workspace_files');
+}
+
 export class FileWorkspace {
   readonly baseDir: string;
 
-  constructor(baseDirectory: string = './data/workspace_files') {
-    this.baseDir = resolve(normalize(baseDirectory));
-    if (!existsSync(this.baseDir)) {
-      mkdirSync(this.baseDir, { recursive: true });
+  constructor(baseDirectory?: string) {
+    const target = resolveWorkspaceFilesDirectory(baseDirectory);
+    try {
+      if (!existsSync(target)) {
+        mkdirSync(target, { recursive: true });
+      }
+      this.baseDir = target;
+    } catch (err) {
+      console.warn(`[FileWorkspace] Warning: Could not create baseDir at ${target}:`, err);
+      // Fallback to os.tmpdir() to prevent container startup failure
+      const fallback = resolve(join(tmpdir(), 'opendots_workspace_files'));
+      try {
+        if (!existsSync(fallback)) {
+          mkdirSync(fallback, { recursive: true });
+        }
+        this.baseDir = fallback;
+      } catch {
+        this.baseDir = target;
+      }
     }
   }
 
@@ -167,4 +195,4 @@ export class FileWorkspace {
   }
 }
 
-export const globalFileWorkspace = new FileWorkspace('./data/workspace_files');
+export const globalFileWorkspace = new FileWorkspace();

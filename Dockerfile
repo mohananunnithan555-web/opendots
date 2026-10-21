@@ -9,8 +9,8 @@ FROM node:24-bookworm-slim AS app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=4310 DATABASE_PATH=/data/opendots.sqlite
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev && mkdir -p /data && chown -R node:node /data
-COPY --from=build /app/dist ./dist
+RUN npm ci --omit=dev && mkdir -p /data/workspace_files /app/data/workspace_files && chown -R node:node /data /app
+COPY --from=build --chown=node:node /app/dist ./dist
 USER node
 EXPOSE 4310
 CMD ["node", "dist/server/server/index.js"]
