@@ -2,14 +2,17 @@ import { z } from 'zod';
 
 export type PlanStatus =
   | 'pending'
+  | 'queued'
   | 'running'
   | 'waiting_approval'
+  | 'paused'
   | 'completed'
   | 'failed'
   | 'cancelled';
 
 export type PlanStepStatus =
   | 'pending'
+  | 'queued'
   | 'running'
   | 'waiting_approval'
   | 'completed'
@@ -30,6 +33,10 @@ export interface TaskStep {
   approved?: boolean;
   retries?: number;
   maxRetries?: number;
+  dependsOn?: string[];
+  assignedSpecialist?: string;
+  validationCriteria?: string[];
+  deliverablePath?: string;
   startedAt?: number;
   finishedAt?: number;
 }
@@ -37,6 +44,8 @@ export interface TaskStep {
 export interface TaskPlan {
   id: string;
   ownerId: string;
+  projectId?: string;
+  spaceId?: string;
   goal: string;
   status: PlanStatus;
   currentStepIndex: number;
@@ -45,6 +54,22 @@ export interface TaskPlan {
   error?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface CoworkWorkflowTemplate {
+  id: string;
+  title: string;
+  description: string;
+  category: 'research' | 'documents' | 'analytics' | 'presentation' | 'engineering' | 'handover';
+  steps: Array<{
+    title: string;
+    description: string;
+    tool: string;
+    defaultInput: Record<string, unknown>;
+    assignedSpecialist?: string;
+    requiresApproval?: boolean;
+    validationCriteria?: string[];
+  }>;
 }
 
 export const TaskStepSchema = z.object({

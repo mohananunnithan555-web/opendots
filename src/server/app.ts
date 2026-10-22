@@ -13,6 +13,12 @@ import { workspaceRoutes } from './workspace-routes.js';
 import { TaskPlanner } from './planner/task-planner.js';
 import { globalSkillRegistry } from './skills/index.js';
 import { globalFileWorkspace } from './files/file-workspace.js';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import {
+  COWORK_WORKFLOW_TEMPLATES,
+  getCoworkTemplate,
+} from './planner/cowork-templates.js';
 import type {
   ConnectorType,
   ApprovalActionType,
@@ -447,6 +453,44 @@ export function createApp({
     return c.json(taskPlanner.listPlans());
   });
 
+  // Cowork Workflow Templates API
+  app.get('/api/planner/templates', (c) => {
+    return c.json(COWORK_WORKFLOW_TEMPLATES);
+  });
+
+  app.get('/api/planner/templates/:templateId', (c) => {
+    const template = getCoworkTemplate(c.req.param('templateId'));
+    if (!template) return c.json({ error: 'Template not found' }, 404);
+    return c.json(template);
+  });
+
+  app.post('/api/planner/templates/:templateId/instantiate', async (c) => {
+    const templateId = c.req.param('templateId');
+    const parsed = z
+      .object({
+        goal: z.string().trim().max(2000).optional(),
+        spaceId: z.string().optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json({ error: 'Invalid instantiation payload.' }, 400);
+    }
+    try {
+      const plan = taskPlanner.createPlanFromTemplate(
+        templateId,
+        parsed.data.goal,
+        parsed.data.spaceId,
+      );
+      return c.json(plan, 201);
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : 'Failed to instantiate template.' },
+        400,
+      );
+    }
+  });
+
   app.post('/api/plans', async (c) => {
     const parsed = z
       .object({ goal: z.string().trim().min(1).max(2000) })
@@ -477,12 +521,52 @@ export function createApp({
     }
   });
 
+  app.post('/api/plans/:id/pause', (c) => {
+    try {
+      const plan = taskPlanner.pausePlan(c.req.param('id'));
+      return c.json(plan);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Pause failed.' }, 400);
+    }
+  });
+
+  app.post('/api/plans/:id/resume', (c) => {
+    try {
+      const plan = taskPlanner.resumePlan(c.req.param('id'));
+      return c.json(plan);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Resume failed.' }, 400);
+    }
+  });
+
   app.post('/api/plans/:id/steps/:stepId/approve', async (c) => {
     try {
       const result = await taskPlanner.approveStep(c.req.param('id'), c.req.param('stepId'));
       return c.json(result);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Approval failed.' }, 400);
+    }
+  });
+
+  app.post('/api/plans/:id/steps/:stepId/replan', async (c) => {
+    const parsed = z
+      .object({
+        reason: z.string().trim().min(1).max(1000),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: 'Replan reason is required.' }, 400);
+    }
+    try {
+      const plan = taskPlanner.replanStep(
+        c.req.param('id'),
+        c.req.param('stepId'),
+        parsed.data.reason,
+      );
+      return c.json(plan);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Replan failed.' }, 400);
     }
   });
 
@@ -499,6 +583,93 @@ export function createApp({
     return store.deleteTaskPlan(c.req.param('id'))
       ? c.json({ ok: true })
       : c.json({ error: 'Plan not found.' }, 404);
+  });
+
+  // Project Workspace Files API
+  app.get('/api/projects/:id/files', async (c) => {
+    const projectId = c.req.param('id');
+    try {
+      const files = await globalFileWorkspace.listFiles('', projectId);
+      return c.json({ files });
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : 'Failed to list project files.' },
+        500,
+      );
+    }
+  });
+
+  app.post('/api/projects/:id/files', async (c) => {
+    const projectId = c.req.param('id');
+    const parsed = z
+      .object({
+        path: z.string().trim().min(1).max(500),
+        content: z.string(),
+        category: z.enum(['source', 'intermediate', 'deliverable', 'archive', 'general']).optional(),
+        comment: z.string().max(200).optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: 'Valid path and content are required.' }, 400);
+    }
+    try {
+      const saved = await globalFileWorkspace.writeVersionedFile(
+        parsed.data.path,
+        parsed.data.content,
+        'user',
+        parsed.data.comment || 'Uploaded to project',
+        projectId,
+        parsed.data.category || 'source',
+      );
+      return c.json(saved, 201);
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : 'Failed to write project file.' },
+        400,
+      );
+    }
+  });
+
+  app.get('/api/files/download', async (c) => {
+    const filePath = c.req.query('path');
+    const projectId = c.req.query('projectId') || undefined;
+    if (!filePath) {
+      return c.json({ error: 'Path query parameter is required.' }, 400);
+    }
+    try {
+      const resolved = globalFileWorkspace.resolveSafePath(filePath, projectId);
+      const content = await fs.readFile(resolved, 'utf-8');
+      const filename = path.basename(resolved);
+      const ext = path.extname(filename).toLowerCase();
+      let contentType = 'text/plain; charset=utf-8';
+      if (ext === '.json') contentType = 'application/json';
+      else if (ext === '.csv') contentType = 'text/csv; charset=utf-8';
+      else if (ext === '.md') contentType = 'text/markdown; charset=utf-8';
+      else if (ext === '.html') contentType = 'text/html; charset=utf-8';
+
+      c.header('Content-Type', contentType);
+      c.header('Content-Disposition', `attachment; filename="${filename}"`);
+      return c.body(content);
+    } catch (err) {
+      return c.json({ error: 'File not found or access denied.' }, 404);
+    }
+  });
+
+  app.get('/api/files/diff', async (c) => {
+    const filePath = c.req.query('path');
+    const v1 = parseInt(c.req.query('v1') || '1', 10);
+    const v2 = parseInt(c.req.query('v2') || '2', 10);
+    const projectId = c.req.query('projectId') || undefined;
+    if (!filePath) {
+      return c.json({ error: 'Path query parameter is required.' }, 400);
+    }
+    try {
+      const diff = await globalFileWorkspace.diffVersions(filePath, v1, v2, projectId);
+      return c.json(diff);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Diff failed.' }, 400);
+    }
   });
 
   app.get('/api/skills', (c) => {

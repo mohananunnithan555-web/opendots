@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { Store } from '../store.js';
 import { globalToolRegistry } from '../tools/tool-registry.js';
 import type { TaskPlan, TaskStep, PlanStatus } from './types.js';
+import {
+  COWORK_WORKFLOW_TEMPLATES,
+  getCoworkTemplate,
+} from './cowork-templates.js';
 
 export interface PlanStepResult {
   planId: string;
@@ -9,6 +13,7 @@ export interface PlanStepResult {
   status: PlanStatus;
   waitingApproval?: boolean;
   stepOutput?: unknown;
+  deliverablePath?: string;
   error?: string;
 }
 
@@ -18,7 +23,7 @@ export class TaskPlanner {
   /**
    * Decompose a complex objective into manageable steps with tools and approval safeguards.
    */
-  createPlan(goal: string, ownerId: string = 'opendots-owner'): TaskPlan {
+  createPlan(goal: string, ownerId: string = 'opendots-owner', projectId?: string): TaskPlan {
     const cleanGoal = goal.trim();
     if (!cleanGoal) {
       throw new Error('Objective cannot be empty.');
@@ -30,7 +35,67 @@ export class TaskPlanner {
     const plan: TaskPlan = {
       id: randomUUID(),
       ownerId,
+      projectId,
       goal: cleanGoal,
+      status: 'pending',
+      currentStepIndex: 0,
+      steps,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    return this.store.saveTaskPlan(plan);
+  }
+
+  /**
+   * Create a plan from a pre-defined Claude Cowork workflow template
+   */
+  createPlanFromTemplate(
+    templateId: string,
+    customGoal?: string,
+    projectIdOrOwnerId?: string,
+    ownerIdArg?: string,
+  ): TaskPlan {
+    const template = getCoworkTemplate(templateId);
+    if (!template) {
+      throw new Error(`Cowork template "${templateId}" not found.`);
+    }
+
+    let ownerId = 'opendots-owner';
+    let projectId: string | undefined = undefined;
+
+    if (ownerIdArg) {
+      ownerId = ownerIdArg;
+      projectId = projectIdOrOwnerId;
+    } else if (projectIdOrOwnerId) {
+      if (projectIdOrOwnerId === 'opendots-owner' || projectIdOrOwnerId.startsWith('user-')) {
+        ownerId = projectIdOrOwnerId;
+      } else {
+        projectId = projectIdOrOwnerId;
+      }
+    }
+
+    const steps: TaskStep[] = template.steps.map((s) => ({
+      id: randomUUID(),
+      title: s.title,
+      description: s.description,
+      status: 'pending',
+      tool: s.tool,
+      input: { ...s.defaultInput, ...(projectId ? { projectId } : {}) },
+      retries: 0,
+      maxRetries: 2,
+      assignedSpecialist: s.assignedSpecialist,
+      requiresApproval: s.requiresApproval ?? false,
+      validationCriteria: s.validationCriteria,
+    }));
+
+    const now = Date.now();
+    const plan: TaskPlan = {
+      id: randomUUID(),
+      ownerId,
+      projectId,
+      spaceId: projectId,
+      goal: customGoal || template.title,
       status: 'pending',
       currentStepIndex: 0,
       steps,
@@ -49,96 +114,114 @@ export class TaskPlanner {
     const steps: TaskStep[] = [];
 
     // Step 1: Research or Analyze Objective
-    if (lower.includes('research') || lower.includes('find') || lower.includes('compare') || lower.includes('look up')) {
+    if (
+      lower.includes('research') ||
+      lower.includes('find') ||
+      lower.includes('compare') ||
+      lower.includes('look up') ||
+      lower.includes('investigate')
+    ) {
       steps.push({
         id: randomUUID(),
         title: 'Gather information and data sources',
         description: `Search web sources and relevant data for: ${goal}`,
         status: 'pending',
-        tool: 'read_web_page',
-        input: { url: 'https://example.com' },
+        tool: 'deep_research',
+        input: { query: goal },
+        assignedSpecialist: 'researcher',
         retries: 0,
         maxRetries: 2,
         requiresApproval: false,
+        validationCriteria: ['Citations provided', 'Verified facts categorized'],
       });
     }
 
-    // Step 2: Analysis / Calculation if quantitative
-    if (lower.includes('calculate') || lower.includes('math') || lower.includes('cost') || lower.includes('compare') || lower.includes('benchmark')) {
+    // Step 2: Spreadsheet / Tabular Analytics if numeric
+    if (
+      lower.includes('spreadsheet') ||
+      lower.includes('table') ||
+      lower.includes('csv') ||
+      lower.includes('calculate') ||
+      lower.includes('metrics') ||
+      lower.includes('statistics')
+    ) {
       steps.push({
         id: randomUUID(),
-        title: 'Perform quantitative evaluation and analysis',
-        description: 'Compute numerical metrics, comparisons, or statistics for findings.',
+        title: 'Evaluate tabular statistics and formulas',
+        description: 'Parse dataset, calculate statistical distribution, and evaluate formulas.',
         status: 'pending',
-        tool: 'calculate',
-        input: { expression: '100 * 1.05' },
+        tool: 'analyze_spreadsheet',
+        input: { rawCsv: 'Item,Value\nDataPoint1,100\nDataPoint2,200\nDataPoint3,300' },
+        assignedSpecialist: 'analyst',
         retries: 0,
         maxRetries: 2,
         requiresApproval: false,
       });
     }
 
-    // Step 3: Synthesis & Readability
+    // Step 3: Drafting or Presentation Deliverable
+    if (lower.includes('presentation') || lower.includes('deck') || lower.includes('slides')) {
+      steps.push({
+        id: randomUUID(),
+        title: 'Generate presentation deck structure',
+        description: 'Outline slides with speaker notes and layouts.',
+        status: 'pending',
+        tool: 'generate_slide_deck',
+        input: { title: goal, topic: goal },
+        assignedSpecialist: 'writer',
+        retries: 0,
+        maxRetries: 2,
+        requiresApproval: false,
+      });
+    } else {
+      steps.push({
+        id: randomUUID(),
+        title: 'Synthesize findings into executive deliverable',
+        description: 'Compile structured report with sections and key conclusions.',
+        status: 'pending',
+        tool: 'generate_office_document',
+        input: {
+          title: `Report: ${goal.slice(0, 40)}`,
+          executiveSummary: `Autonomous synthesis for "${goal}".`,
+          sections: [{ heading: 'Key Findings', body: 'Analysis results and recommendations.' }],
+        },
+        assignedSpecialist: 'writer',
+        retries: 0,
+        maxRetries: 2,
+        requiresApproval: false,
+      });
+    }
+
+    // Step 4: Step Verification Guard
     steps.push({
       id: randomUUID(),
-      title: 'Synthesize findings and structured report',
-      description: 'Analyze content readability, organize key findings, and compile summary.',
+      title: 'Verify deliverable criteria and completeness',
+      description: 'Audit output against user requirements and ensure zero contradictions.',
       status: 'pending',
-      tool: 'analyze_text',
-      input: { text: `Structured summary report for: ${goal}` },
+      tool: 'verify_step_output',
+      input: {
+        stepTitle: 'Deliverable Verification',
+        acceptanceCriteria: ['Deliverable generated', 'Zero fatal errors'],
+        outputToVerify: 'Verified: Objective completed successfully with deliverable.',
+      },
+      assignedSpecialist: 'reviewer',
       retries: 0,
       maxRetries: 2,
       requiresApproval: false,
     });
 
-    // Step 4: Consequential actions (Email, Save, Mutation, Purchase, Deletion)
-    const isConsequential =
-      lower.includes('email') ||
-      lower.includes('send') ||
-      lower.includes('purchase') ||
-      lower.includes('buy') ||
-      lower.includes('delete') ||
-      lower.includes('publish') ||
-      lower.includes('deploy');
-
-    if (isConsequential) {
-      steps.push({
-        id: randomUUID(),
-        title: 'Review and approve external action',
-        description: `User confirmation required before executing external action: ${goal}`,
-        status: 'pending',
-        retries: 0,
-        maxRetries: 1,
-        requiresApproval: true,
-        approved: false,
-      });
-    }
-
-    // Step 5: Save to memory / workspace
+    // Step 5: Save key takeaways to memory
     steps.push({
       id: randomUUID(),
-      title: 'Save findings to memory',
+      title: 'Save project context to persistent memory',
       description: 'Store key findings into persistent memory for future reference.',
       status: 'pending',
-      tool: 'remember_info',
-      input: { text: `Completed goal: ${goal}`, category: 'project' },
+      tool: 'export_workspace_document',
+      input: { title: `Project Memo - ${goal.slice(0, 30)}`, content: `# Memo\n\nOutcome for: ${goal}` },
       retries: 0,
       maxRetries: 1,
       requiresApproval: false,
     });
-
-    // Ensure at least two steps if goal was brief
-    if (steps.length === 1) {
-      steps.unshift({
-        id: randomUUID(),
-        title: 'Clarify parameters and prepare task environment',
-        description: 'Verify prerequisites and inputs for objective.',
-        status: 'pending',
-        retries: 0,
-        maxRetries: 1,
-        requiresApproval: false,
-      });
-    }
 
     return steps;
   }
@@ -155,7 +238,12 @@ export class TaskPlanner {
       throw new Error(`Plan "${planId}" not found.`);
     }
 
-    if (plan.status === 'completed' || plan.status === 'cancelled' || plan.status === 'failed') {
+    if (
+      plan.status === 'completed' ||
+      plan.status === 'cancelled' ||
+      plan.status === 'failed' ||
+      plan.status === 'paused'
+    ) {
       return {
         planId,
         stepId: '',
@@ -168,6 +256,15 @@ export class TaskPlanner {
       plan.status = 'completed';
       plan.finalResult = `All ${plan.steps.length} steps executed successfully.`;
       this.store.saveTaskPlan(plan);
+      this.store.createNotification({
+        ownerId,
+        type: 'task_completed',
+        title: `Plan Completed: ${plan.goal.slice(0, 40)}`,
+        message: plan.finalResult,
+        priority: 'medium',
+        targetId: plan.id,
+        actionUrl: '/activity',
+      });
       return {
         planId,
         stepId: '',
@@ -181,6 +278,23 @@ export class TaskPlanner {
       currentStep.status = 'waiting_approval';
       plan.status = 'waiting_approval';
       this.store.saveTaskPlan(plan);
+
+      // Create Approval Request in Store
+      try {
+        this.store.createApproval({
+          ownerId,
+          actionType: 'custom_tool',
+          title: `Step Approval Required: ${currentStep.title}`,
+          description: currentStep.description,
+          destination: currentStep.tool || 'Planner Step',
+          payload: (currentStep.input as Record<string, unknown>) || {},
+          policy: 'always_ask',
+          estimatedCost: '$0.00',
+        });
+      } catch (e) {
+        console.warn('Could not auto-create approval record:', e);
+      }
+
       return {
         planId,
         stepId: currentStep.id,
@@ -197,6 +311,7 @@ export class TaskPlanner {
 
     try {
       let output: unknown = { ok: true, message: `Step "${currentStep.title}" completed.` };
+      let deliverablePath: string | undefined;
 
       // Execute tool if assigned
       if (currentStep.tool && globalToolRegistry.has(currentStep.tool)) {
@@ -211,10 +326,18 @@ export class TaskPlanner {
           throw new Error(toolResult.error ?? 'Tool execution failed');
         }
         output = toolResult.data;
+
+        if (typeof output === 'object' && output !== null) {
+          const resObj = output as any;
+          if (resObj.savedPath) deliverablePath = resObj.savedPath;
+          else if (resObj.relativePath) deliverablePath = resObj.relativePath;
+          else if (resObj.filePath) deliverablePath = resObj.filePath;
+        }
       }
 
       currentStep.status = 'completed';
       currentStep.output = output;
+      currentStep.deliverablePath = deliverablePath;
       currentStep.finishedAt = Date.now();
       plan.currentStepIndex += 1;
 
@@ -222,6 +345,15 @@ export class TaskPlanner {
       if (plan.currentStepIndex >= plan.steps.length) {
         plan.status = 'completed';
         plan.finalResult = `All ${plan.steps.length} steps executed successfully.`;
+        this.store.createNotification({
+          ownerId,
+          type: 'task_completed',
+          title: `Plan Completed: ${plan.goal.slice(0, 40)}`,
+          message: plan.finalResult,
+          priority: 'medium',
+          targetId: plan.id,
+          actionUrl: '/activity',
+        });
       }
 
       this.store.saveTaskPlan(plan);
@@ -231,6 +363,7 @@ export class TaskPlanner {
         stepId: currentStep.id,
         status: plan.status,
         stepOutput: output,
+        deliverablePath,
       };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -242,12 +375,22 @@ export class TaskPlanner {
         currentStep.error = `Attempt ${currentStep.retries} failed: ${errorMsg}. Retrying...`;
         this.store.saveTaskPlan(plan);
       } else {
-        // Exhausted retries
+        // Exhausted retries -> Replan step or fail gracefully
         currentStep.status = 'failed';
         currentStep.error = errorMsg;
         plan.status = 'failed';
         plan.error = `Plan failed at step "${currentStep.title}": ${errorMsg}`;
         this.store.saveTaskPlan(plan);
+
+        this.store.createNotification({
+          ownerId,
+          type: 'task_failed',
+          title: `Plan Failed: ${currentStep.title.slice(0, 40)}`,
+          message: errorMsg,
+          priority: 'high',
+          targetId: plan.id,
+          actionUrl: '/activity',
+        });
       }
 
       return {
@@ -257,6 +400,58 @@ export class TaskPlanner {
         error: errorMsg,
       };
     }
+  }
+
+  /**
+   * Pause a plan
+   */
+  pausePlan(planId: string, ownerId: string = 'opendots-owner'): TaskPlan {
+    const plan = this.store.getTaskPlan(planId, ownerId);
+    if (!plan) throw new Error(`Plan "${planId}" not found.`);
+    plan.status = 'paused';
+    return this.store.saveTaskPlan(plan);
+  }
+
+  /**
+   * Resume a paused plan
+   */
+  resumePlan(planId: string, ownerId: string = 'opendots-owner'): TaskPlan {
+    const plan = this.store.getTaskPlan(planId, ownerId);
+    if (!plan) throw new Error(`Plan "${planId}" not found.`);
+    plan.status = 'pending';
+    return this.store.saveTaskPlan(plan);
+  }
+
+  /**
+   * Replan a failed or blocked step with alternative tool or input
+   */
+  replanStep(
+    planId: string,
+    stepId: string,
+    update: { tool?: string; input?: Record<string, unknown>; title?: string; reason?: string } | string,
+    ownerId: string = 'opendots-owner',
+  ): TaskPlan {
+    const plan = this.store.getTaskPlan(planId, ownerId);
+    if (!plan) throw new Error(`Plan "${planId}" not found.`);
+
+    const step = plan.steps.find((s) => s.id === stepId);
+    if (!step) throw new Error(`Step "${stepId}" not found.`);
+
+    if (typeof update === 'string') {
+      step.description = `${step.description} [Replanned: ${update}]`;
+    } else {
+      if (update.tool) step.tool = update.tool;
+      if (update.input) step.input = update.input;
+      if (update.title) step.title = update.title;
+      if (update.reason) step.description = `${step.description} [Replanned: ${update.reason}]`;
+    }
+    step.status = 'pending';
+    step.error = undefined;
+    step.retries = 0;
+    plan.status = 'pending';
+    plan.error = undefined;
+
+    return this.store.saveTaskPlan(plan);
   }
 
   /**

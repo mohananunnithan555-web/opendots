@@ -14,6 +14,10 @@ import {
   ExternalLink,
   Shield,
   Key,
+  Cloud,
+  Code2,
+  BookOpen,
+  CheckSquare,
 } from 'lucide-react';
 import { api } from './api';
 import type { Connector, ConnectorType } from '../shared/types';
@@ -103,6 +107,14 @@ export function ConnectorsHub() {
         return <MessageSquare className="w-5 h-5 text-emerald-500" />;
       case 'slack':
         return <Hash className="w-5 h-5 text-purple-500" />;
+      case 'onedrive':
+        return <Cloud className="w-5 h-5 text-blue-600" />;
+      case 'github':
+        return <Code2 className="w-5 h-5 text-gray-800 dark:text-gray-200" />;
+      case 'notion':
+        return <BookOpen className="w-5 h-5 text-slate-800 dark:text-slate-200" />;
+      case 'asana':
+        return <CheckSquare className="w-5 h-5 text-rose-500" />;
       default:
         return <Plug className="w-5 h-5 text-indigo-500" />;
     }

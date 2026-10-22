@@ -27,6 +27,10 @@ import {
   writeWorkspaceFileTool,
   listWorkspaceFilesTool,
   exportDocumentTool,
+  analyzeSpreadsheetTool,
+  generateOfficeDocTool,
+  generateSlideDeckTool,
+  diffDocumentsTool,
 } from '../files/file-tools.js';
 
 export class ToolRegistry {
@@ -105,6 +109,10 @@ globalToolRegistry.register(readWorkspaceFileTool);
 globalToolRegistry.register(writeWorkspaceFileTool);
 globalToolRegistry.register(listWorkspaceFilesTool);
 globalToolRegistry.register(exportDocumentTool);
+globalToolRegistry.register(analyzeSpreadsheetTool);
+globalToolRegistry.register(generateOfficeDocTool);
+globalToolRegistry.register(generateSlideDeckTool);
+globalToolRegistry.register(diffDocumentsTool);
 globalToolRegistry.register(gmailWorkspaceTool);
 globalToolRegistry.register(calendarTasksWorkspaceTool);
 globalToolRegistry.register(docsDriveWorkspaceTool);

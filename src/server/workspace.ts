@@ -220,6 +220,32 @@ export class WorkspaceStore {
       throw e;
     }
   }
+  duplicateSpace(id: string, newName?: string): Space {
+    const original = this.spaces().find((s) => s.id === id);
+    if (!original) {
+      throw new Error(`Space/Project "${id}" not found.`);
+    }
+    const name = newName || `${original.name} (Copy)`;
+    const copy = this.createSpace(
+      name,
+      original.description,
+      original.goal,
+      original.instructions,
+    );
+    try {
+      const originalPages = this.pages.list(id);
+      for (const page of originalPages) {
+        const full = this.pages.get(id, page.id);
+        this.pages.create(copy.id, {
+          title: full.title,
+          content: full.content,
+        });
+      }
+    } catch (err) {
+      console.warn(`[duplicateSpace] Failed to copy pages from space ${id}:`, err);
+    }
+    return copy;
+  }
   dots(): Dot[] {
     return this.db
       .prepare('SELECT * FROM dots ORDER BY createdAt')

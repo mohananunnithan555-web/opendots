@@ -30,6 +30,7 @@ import {
   Bell,
   Sparkles,
   Boxes,
+  Briefcase,
 } from 'lucide-react';
 import type {
   Conversation,
@@ -66,6 +67,7 @@ import { ConnectorsHub } from './ConnectorsHub';
 import { NotificationCenter } from './NotificationCenter';
 import { SetupAssistantModal } from './SetupAssistantModal';
 import { McpDirectoryModal } from './McpDirectoryModal';
+import { CoworkProjectWorkspace } from './CoworkProjectWorkspace';
 
 function describeFailure(error: unknown, fallback: string) {
   return {
@@ -81,7 +83,7 @@ export function App() {
   const [selectedDot, setSelectedDot] = useState('');
   const [selectedThread, setSelectedThread] = useState<string>();
   const [view, rawSetView] = useState<
-    'chat' | 'tasks' | 'goals' | 'approvals' | 'connectors' | 'memories' | 'space' | 'activity'
+    'chat' | 'tasks' | 'goals' | 'approvals' | 'connectors' | 'memories' | 'space' | 'activity' | 'cowork'
   >('chat');
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
   const [skillModalOpen, setSkillModalOpen] = useState(false);
@@ -507,6 +509,16 @@ export function App() {
         )}
         <div className="sidebar-bottom">
           <button
+            className={`nav-item ${view === 'cowork' ? 'active' : ''}`}
+            onClick={() => {
+              setView('cowork');
+              setMobile(false);
+            }}
+          >
+            <Briefcase size={17} />
+            <span>Cowork Projects</span>
+          </button>
+          <button
             className={`nav-item ${view === 'goals' ? 'active' : ''}`}
             onClick={() => {
               setView('goals');
@@ -904,7 +916,9 @@ export function App() {
               <div>
                 <span className="eyebrow">YOUR WORKSPACE</span>
                 <h1>
-                  {view === 'memories'
+                  {view === 'cowork'
+                    ? 'Cowork Projects'
+                    : view === 'memories'
                     ? 'Memories'
                     : view === 'goals'
                     ? 'Goals & Milestones'
@@ -915,7 +929,9 @@ export function App() {
                     : 'A little follow-through.'}
                 </h1>
                 <p>
-                  {view === 'memories'
+                  {view === 'cowork'
+                    ? 'Multi-file project workspaces, office document generation, and 12 autonomous Cowork workflows.'
+                    : view === 'memories'
                     ? 'Preferences you choose to share with your Dots.'
                     : view === 'goals'
                     ? 'Track long-term milestones, deadlines, and receive proactive advice.'
@@ -946,7 +962,18 @@ export function App() {
                 </div>
               )}
             </div>
-            {view === 'activity' ? (
+            {view === 'cowork' ? (
+              <CoworkProjectWorkspace
+                spaces={workspace.spaces}
+                activeSpaceId={spaceId}
+                onSelectSpace={(id) => {
+                  setSpaceId(id);
+                }}
+                onRefreshWorkspace={() => {
+                  void refresh();
+                }}
+              />
+            ) : view === 'activity' ? (
               <ActivityCenter />
             ) : view === 'goals' ? (
               <GoalsDashboard

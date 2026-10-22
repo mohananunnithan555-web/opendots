@@ -88,6 +88,8 @@ export class Store {
         stepsJson TEXT NOT NULL,
         finalResult TEXT,
         error TEXT,
+        spaceId TEXT,
+        projectId TEXT,
         createdAt INTEGER NOT NULL,
         updatedAt INTEGER NOT NULL
       );
@@ -192,6 +194,14 @@ export class Store {
       if (!taskColNames.has('changeHistoryJson')) this.db.exec("ALTER TABLE tasks ADD COLUMN changeHistoryJson TEXT DEFAULT '[]'");
       if (!taskColNames.has('dependsOnJson')) this.db.exec("ALTER TABLE tasks ADD COLUMN dependsOnJson TEXT DEFAULT '[]'");
       if (!taskColNames.has('idempotencyKey')) this.db.exec("ALTER TABLE tasks ADD COLUMN idempotencyKey TEXT");
+    } catch {}
+
+    // Ensure task_plans spaceId and projectId columns exist
+    try {
+      const planCols = this.db.prepare('PRAGMA table_info(task_plans)').all() as Array<{ name: string }>;
+      const planColNames = new Set(planCols.map((c) => c.name));
+      if (!planColNames.has('spaceId')) this.db.exec('ALTER TABLE task_plans ADD COLUMN spaceId TEXT');
+      if (!planColNames.has('projectId')) this.db.exec('ALTER TABLE task_plans ADD COLUMN projectId TEXT');
     } catch {}
 
     // Migrate any legacy rows into memories_v2
@@ -871,16 +881,19 @@ export class Store {
     const now = Date.now();
     const id = plan.id || randomUUID();
     const ownerId = plan.ownerId || 'opendots-owner';
+    const spaceId = plan.spaceId || plan.projectId || null;
     this.db
       .prepare(
-        `INSERT INTO task_plans (id, ownerId, goal, status, currentStepIndex, stepsJson, finalResult, error, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO task_plans (id, ownerId, goal, status, currentStepIndex, stepsJson, finalResult, error, spaceId, projectId, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            status=excluded.status,
            currentStepIndex=excluded.currentStepIndex,
            stepsJson=excluded.stepsJson,
            finalResult=excluded.finalResult,
            error=excluded.error,
+           spaceId=COALESCE(excluded.spaceId, task_plans.spaceId),
+           projectId=COALESCE(excluded.projectId, task_plans.projectId),
            updatedAt=excluded.updatedAt`,
       )
       .run(
@@ -892,6 +905,8 @@ export class Store {
         JSON.stringify(plan.steps),
         plan.finalResult ?? null,
         plan.error ?? null,
+        spaceId,
+        spaceId,
         plan.createdAt || now,
         now,
       );
@@ -910,6 +925,8 @@ export class Store {
         stepsJson: string;
         finalResult: string | null;
         error: string | null;
+        spaceId?: string | null;
+        projectId?: string | null;
         createdAt: number;
         updatedAt: number;
       } | undefined;
@@ -926,6 +943,8 @@ export class Store {
         steps: JSON.parse(row.stepsJson),
         finalResult: row.finalResult ?? undefined,
         error: row.error ?? undefined,
+        spaceId: row.spaceId ?? row.projectId ?? undefined,
+        projectId: row.projectId ?? row.spaceId ?? undefined,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
       };
@@ -946,22 +965,34 @@ export class Store {
         stepsJson: string;
         finalResult: string | null;
         error: string | null;
+        spaceId?: string | null;
+        projectId?: string | null;
         createdAt: number;
         updatedAt: number;
       }>;
 
-    return rows.map((row) => ({
-      id: row.id,
-      ownerId: row.ownerId,
-      goal: row.goal,
-      status: row.status as any,
-      currentStepIndex: row.currentStepIndex,
-      steps: JSON.parse(row.stepsJson),
-      finalResult: row.finalResult ?? undefined,
-      error: row.error ?? undefined,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    }));
+    const plans: TaskPlan[] = [];
+    for (const row of rows) {
+      try {
+        plans.push({
+          id: row.id,
+          ownerId: row.ownerId,
+          goal: row.goal,
+          status: row.status as any,
+          currentStepIndex: row.currentStepIndex,
+          steps: JSON.parse(row.stepsJson),
+          finalResult: row.finalResult ?? undefined,
+          error: row.error ?? undefined,
+          spaceId: row.spaceId ?? row.projectId ?? undefined,
+          projectId: row.projectId ?? row.spaceId ?? undefined,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        });
+      } catch {
+        // ignore malformed row
+      }
+    }
+    return plans;
   }
 
   deleteTaskPlan(id: string, ownerId: string = 'opendots-owner'): boolean {
@@ -1350,6 +1381,42 @@ export class Store {
         config: {},
         permissions: ['Channel messaging, thread replies, and project summaries'],
         availableActions: ['post_message', 'reply_thread', 'share_summary'],
+      },
+      {
+        id: 'conn-onedrive',
+        type: 'onedrive',
+        name: 'Microsoft OneDrive & Office 365',
+        status: process.env.MICROSOFT_CLIENT_ID ? 'connected' : 'unconfigured',
+        config: {},
+        permissions: ['Read files, analyze Excel workbooks, draft Word docs, sync PPTX'],
+        availableActions: ['read_file', 'upload_deliverable', 'inspect_folder', 'export_office_doc'],
+      },
+      {
+        id: 'conn-notion',
+        type: 'notion',
+        name: 'Notion Knowledge Base',
+        status: process.env.NOTION_API_KEY ? 'connected' : 'unconfigured',
+        config: {},
+        permissions: ['Query databases, fetch page markdown, create project documentation'],
+        availableActions: ['search_pages', 'create_page', 'update_database', 'read_block'],
+      },
+      {
+        id: 'conn-github',
+        type: 'github',
+        name: 'GitHub Repositories & PRs',
+        status: process.env.GITHUB_TOKEN ? 'connected' : 'unconfigured',
+        config: {},
+        permissions: ['Inspect code, read pull requests, review commits, create issues'],
+        availableActions: ['search_repositories', 'read_file_contents', 'create_issue', 'review_pull_request'],
+      },
+      {
+        id: 'conn-asana',
+        type: 'asana',
+        name: 'Asana Project Management',
+        status: process.env.ASANA_ACCESS_TOKEN ? 'connected' : 'unconfigured',
+        config: {},
+        permissions: ['View tasks, track milestones, update task status'],
+        availableActions: ['list_project_tasks', 'create_task', 'update_status'],
       },
     ];
 

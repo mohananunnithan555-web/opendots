@@ -142,6 +142,27 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       pages: fullPages,
     });
   });
+  app.post('/spaces/:id/duplicate', async (c) => {
+    const id = c.req.param('id');
+    const data = z
+      .object({
+        name: z.string().trim().min(1).max(60).optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => ({})));
+    try {
+      const duplicated = platform.workspace.duplicateSpace(
+        id,
+        data.success ? data.data.name : undefined,
+      );
+      return c.json(duplicated, 201);
+    } catch (e) {
+      return c.json(
+        { error: e instanceof Error ? e.message : 'Could not duplicate Space.' },
+        404,
+      );
+    }
+  });
   app.post('/dots', async (c) => {
     const data = dotSchema
       .extend({ spaceId: z.string() })
