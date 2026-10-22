@@ -1,6 +1,8 @@
 import type { ResearchReport, ResearchSource, SearchProvider } from './types.js';
 import { TavilySearchProvider } from './providers/tavily-provider.js';
 import { SearxngSearchProvider } from './providers/searxng-provider.js';
+import { DuckduckgoSearchProvider } from './providers/duckduckgo-provider.js';
+import { WikipediaSearchProvider } from './providers/wikipedia-provider.js';
 import { DirectScrapeProvider } from './providers/direct-scrape-provider.js';
 import { synthesizeResearchReport } from './citation-engine.js';
 import { webReaderTool } from '../tools/builtin/web-reader.js';
@@ -11,8 +13,11 @@ export class DeepResearchEngine {
   private providers: SearchProvider[] = [];
 
   constructor() {
+    // Priority order: Tavily/SearXNG if configured by user, followed by 100% Free DuckDuckGo & Wikipedia, then direct URLs
     this.providers.push(new TavilySearchProvider());
     this.providers.push(new SearxngSearchProvider());
+    this.providers.push(new DuckduckgoSearchProvider());
+    this.providers.push(new WikipediaSearchProvider());
     this.providers.push(new DirectScrapeProvider());
   }
 

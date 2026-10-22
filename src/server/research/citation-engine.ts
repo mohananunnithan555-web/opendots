@@ -95,10 +95,60 @@ export function synthesizeResearchReport(
     comparisons.push(
       `Primary alignment on core criteria identified in [1], with supplementary context provided by [2].`,
     );
+
+    // Deep Conflict & Contradiction Detection
+    for (let i = 0; i < Math.min(sanitizedSources.length, 4); i++) {
+      for (let j = i + 1; j < Math.min(sanitizedSources.length, 4); j++) {
+        const s1 = sanitizedSources[i];
+        const s2 = sanitizedSources[j];
+        const text1 = (s1.snippet + ' ' + s1.content).toLowerCase();
+        const text2 = (s2.snippet + ' ' + s2.content).toLowerCase();
+
+        const year1 = text1.match(/\b(201\d|202\d)\b/g);
+        const year2 = text2.match(/\b(201\d|202\d)\b/g);
+        if (year1 && year2 && year1[0] !== year2[0]) {
+          conflictingClaims.push(
+            `Temporal divergence detected between [${s1.index}] (${year1[0]}) and [${s2.index}] (${year2[0]}). Timeline data should be verified against recent primary records.`,
+          );
+        }
+
+        const freeSignals = text1.includes('free') || text1.includes('open-source');
+        const paidSignals = text2.includes('paid') || text2.includes('subscription') || text2.includes('pricing');
+        if (freeSignals && paidSignals && !conflictingClaims.some((c) => c.includes('pricing'))) {
+          conflictingClaims.push(
+            `Tier/licensing distinction between [${s1.index}] (mentions free/open usage) and [${s2.index}] (notes commercial or paid tiers).`,
+          );
+        }
+      }
+    }
+
+    if (conflictingClaims.length === 0) {
+      conflictingClaims.push(
+        'No direct contradictions detected among retrieved snippets; sources present largely complementary data points.',
+      );
+    }
   } else {
     comparisons.push('Single source retrieved; multi-source comparative validation unavailable.');
     uncertainties.push('Findings rely on a single primary source. Multi-source cross-verification recommended.');
   }
+
+  // Deep Uncertainty & Missing Information Analysis
+  if (sanitizedSources.length < 3) {
+    uncertainties.push(
+      'Limited source breadth (< 3 domains retrieved). Long-tail technical specifics or edge-case limitations may be underrepresented.',
+    );
+  }
+  const hasInstitutional = sanitizedSources.some(
+    (s) => s.url && (s.url.includes('.gov') || s.url.includes('.edu') || s.url.includes('.org') || s.url.includes('wikipedia.org')),
+  );
+  if (!hasInstitutional) {
+    uncertainties.push(
+      'No formal institutional (.org/.edu/.gov) or reference encyclopedia citations in active results; claims reflect general web publication context.',
+    );
+  }
+  uncertainties.push(
+    'Point-in-time validity: Dynamic parameters (such as live rate limits, subscription tiers, or recent breaking changes) require real-time verification before production deployment.',
+  );
 
   // Build Structured Markdown Comparison Table
   let comparisonTable = `| Source [#] | Title / Domain | Primary Claim | Status |\n`;

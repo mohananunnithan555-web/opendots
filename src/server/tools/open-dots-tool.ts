@@ -70,6 +70,16 @@ export async function executeSafeTool<TInput, TOutput>(
 ): Promise<ToolExecutionResult<TOutput>> {
   const startTime = Date.now();
 
+  // 0. Free-Only Mode Cost Protection Check (₹0 strict policy)
+  const isFreeOnlyActive = ctx.freeOnlyMode !== false;
+  if (isFreeOnlyActive && (tool.isPaidService || (tool.costEstimateUsd && tool.costEstimateUsd > 0))) {
+    return {
+      success: false,
+      error: `Execution blocked: Tool "${tool.name}" requires paid API credits or fees ($${tool.costEstimateUsd ?? 'paid'}). Free-Only Mode is active (strict ₹0 / $0 policy).`,
+      executionTimeMs: 0,
+    };
+  }
+
   // 1. Permission Check
   if (tool.requiredPermission && tool.requiredPermission !== 'basic') {
     const permissions = ctx.userPermissions ?? ['basic'];

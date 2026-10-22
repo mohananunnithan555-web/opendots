@@ -6,6 +6,7 @@ export interface ToolExecutionContext {
   dotId?: string;
   userPermissions?: SkillPermission[];
   signal?: AbortSignal;
+  freeOnlyMode?: boolean;
 }
 
 export interface ToolExecutionResult<TOutput = unknown> {
@@ -24,5 +25,9 @@ export interface OpenDotsToolDefinition<TInput = any, TOutput = any> {
   timeoutMs?: number;
   maxOutputChars?: number;
   requiresApproval?: boolean;
+  /** True if this tool relies on paid endpoints, tokens, or subscription plans. Blocked when Free-Only Mode is active. */
+  isPaidService?: boolean;
+  /** Estimated cost in USD if applicable. */
+  costEstimateUsd?: number;
   execute(input: TInput, ctx: ToolExecutionContext): Promise<TOutput>;
 }

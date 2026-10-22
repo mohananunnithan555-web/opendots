@@ -19,6 +19,17 @@ import {
   COWORK_WORKFLOW_TEMPLATES,
   getCoworkTemplate,
 } from './planner/cowork-templates.js';
+import {
+  codeReviewTool,
+  unitTestGeneratorTool,
+  codeSymbolsTool,
+} from './tools/builtin/code-assistant.js';
+import {
+  redditPublicResearchTool,
+  youtubePublicResearchTool,
+  publicTrendAnalysisTool,
+} from './tools/builtin/social-research.js';
+import { executeSafeTool } from './tools/open-dots-tool.js';
 import type {
   ConnectorType,
   ApprovalActionType,
@@ -1074,6 +1085,130 @@ export function createApp({
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Rollback failed.' }, 400);
     }
+  });
+
+  // -------------------------------------------------------------
+  // WORKSPACE FILE ACCESS & DOWNLOAD (Grok Upgrade)
+  // -------------------------------------------------------------
+  app.get('/api/workspace-files', (c) => {
+    const dir = c.req.query('directory') || '';
+    const files = globalFileWorkspace.listFiles(dir);
+    return c.json({ files });
+  });
+
+  app.get('/api/workspace-files/raw', (c) => {
+    const filePath = c.req.query('filePath');
+    if (!filePath) {
+      return c.json({ error: 'filePath parameter is required.' }, 400);
+    }
+    try {
+      const file = globalFileWorkspace.readFile(filePath);
+      const ext = path.extname(file.name).toLowerCase();
+      const mimeMap: Record<string, string> = {
+        '.json': 'application/json; charset=utf-8',
+        '.md': 'text/markdown; charset=utf-8',
+        '.txt': 'text/plain; charset=utf-8',
+        '.ts': 'text/plain; charset=utf-8',
+        '.js': 'application/javascript; charset=utf-8',
+        '.py': 'text/plain; charset=utf-8',
+        '.csv': 'text/csv; charset=utf-8',
+        '.html': 'text/html; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+      };
+      const contentType = mimeMap[ext] || 'application/octet-stream';
+      return new Response(file.content, {
+        status: 200,
+        headers: {
+          'Content-Type': contentType,
+          'Content-Disposition': `attachment; filename="${encodeURIComponent(file.name)}"`,
+        },
+      });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'File not found.' }, 404);
+    }
+  });
+
+  app.post('/api/workspace-files', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.path || typeof body.path !== 'string') {
+      return c.json({ error: 'path is required.' }, 400);
+    }
+    const content = typeof body.content === 'string' ? body.content : '';
+    try {
+      const written = globalFileWorkspace.writeFile(body.path, content);
+      return c.json(written, 201);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Failed to write file.' }, 400);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // FREE CODING TOOLS (Grok Upgrade)
+  // -------------------------------------------------------------
+  app.post('/api/code/review', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const result = await executeSafeTool(codeReviewTool, body, {
+      userPermissions: ['basic'],
+      freeOnlyMode: store.settings()?.freeOnlyMode ?? true,
+    });
+    return c.json(result);
+  });
+
+  app.post('/api/code/test-gen', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const result = await executeSafeTool(unitTestGeneratorTool, body, {
+      userPermissions: ['basic'],
+      freeOnlyMode: store.settings()?.freeOnlyMode ?? true,
+    });
+    return c.json(result);
+  });
+
+  app.post('/api/code/symbols', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const result = await executeSafeTool(codeSymbolsTool, body, {
+      userPermissions: ['basic'],
+      freeOnlyMode: store.settings()?.freeOnlyMode ?? true,
+    });
+    return c.json(result);
+  });
+
+  // -------------------------------------------------------------
+  // FREE PUBLIC SOCIAL RESEARCH (Grok Upgrade)
+  // -------------------------------------------------------------
+  app.get('/api/social/reddit', async (c) => {
+    const query = c.req.query('query');
+    const subreddit = c.req.query('subreddit');
+    const sort = c.req.query('sort') as any;
+    const limit = Number(c.req.query('limit') || 5);
+    const result = await executeSafeTool(
+      redditPublicResearchTool,
+      { query, subreddit, sort, limit },
+      { userPermissions: ['research'], freeOnlyMode: store.settings()?.freeOnlyMode ?? true },
+    );
+    return c.json(result);
+  });
+
+  app.get('/api/social/youtube', async (c) => {
+    const target = c.req.query('target') || '';
+    const fetchTranscript = c.req.query('fetchTranscript') === 'true';
+    if (!target) return c.json({ error: 'target parameter is required.' }, 400);
+    const result = await executeSafeTool(
+      youtubePublicResearchTool,
+      { target, fetchTranscript },
+      { userPermissions: ['research'], freeOnlyMode: store.settings()?.freeOnlyMode ?? true },
+    );
+    return c.json(result);
+  });
+
+  app.get('/api/social/trends', async (c) => {
+    const category = (c.req.query('category') || 'technology') as any;
+    const keyword = c.req.query('keyword');
+    const result = await executeSafeTool(
+      publicTrendAnalysisTool,
+      { category, keyword },
+      { userPermissions: ['research'], freeOnlyMode: store.settings()?.freeOnlyMode ?? true },
+    );
+    return c.json(result);
   });
 
   // -------------------------------------------------------------

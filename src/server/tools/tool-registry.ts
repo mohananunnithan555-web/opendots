@@ -20,6 +20,17 @@ import {
   slidesPresentationWorkspaceTool,
   keepNotesWorkspaceTool,
 } from './builtin/workspace-google-tools.js';
+import {
+  redditPublicResearchTool,
+  youtubePublicResearchTool,
+  xPublicResearchTool,
+  publicTrendAnalysisTool,
+} from './builtin/social-research.js';
+import {
+  codeReviewTool,
+  unitTestGeneratorTool,
+  codeSymbolsTool,
+} from './builtin/code-assistant.js';
 import { deepResearchTool } from '../research/research-tool.js';
 import { delegateToSpecialistTool } from '../specialists/specialist-tools.js';
 import {
@@ -119,3 +130,10 @@ globalToolRegistry.register(docsDriveWorkspaceTool);
 globalToolRegistry.register(sheetsAnalyticsWorkspaceTool);
 globalToolRegistry.register(slidesPresentationWorkspaceTool);
 globalToolRegistry.register(keepNotesWorkspaceTool);
+globalToolRegistry.register(redditPublicResearchTool);
+globalToolRegistry.register(youtubePublicResearchTool);
+globalToolRegistry.register(xPublicResearchTool);
+globalToolRegistry.register(publicTrendAnalysisTool);
+globalToolRegistry.register(codeReviewTool);
+globalToolRegistry.register(unitTestGeneratorTool);
+globalToolRegistry.register(codeSymbolsTool);

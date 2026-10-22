@@ -51,6 +51,9 @@ export function WorkspaceDialog({
       ? (dialog.dot?.appsAllowed ?? false)
       : state.settings.appsAllowed,
   );
+  const [freeOnlyMode, setFreeOnlyMode] = useState(
+    state.settings.freeOnlyMode ?? true,
+  );
   const [composioToolkits, setComposioToolkits] = useState(
     dialog.type === 'dot'
       ? (dialog.dot?.composioToolkits ?? []).join(', ')
@@ -173,6 +176,7 @@ export function WorkspaceDialog({
                 researchAllowed: research,
                 memoryAllowed: memory,
                 appsAllowed: apps,
+                freeOnlyMode,
               };
             }
             if (dialog.type === 'memory') {
@@ -323,6 +327,21 @@ export function WorkspaceDialog({
                     <small>
                       Allow access to the owner’s apps through Composio. Global
                       settings always take precedence.
+                    </small>
+                  </span>
+                </label>
+              )}
+              {dialog.type === 'settings' && (
+                <label className="permission-row" style={{ borderLeft: '3px solid #10b981', paddingLeft: '0.5rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={freeOnlyMode}
+                    onChange={(e) => setFreeOnlyMode(e.target.checked)}
+                  />
+                  <span>
+                    <strong>Free-Only Mode (Strict ₹0 / $0 Policy)</strong>
+                    <small>
+                      Strictly blocks any integrations, model endpoints, or tools that require paid credits or subscriptions. Keeps your usage 100% free.
                     </small>
                   </span>
                 </label>

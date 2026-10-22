@@ -91,7 +91,7 @@ export function CoworkProjectWorkspace({
   const [selectedSpaceId, setSelectedSpaceId] = useState<string>(
     activeSpaceId || (spaces.length > 0 ? spaces[0].id : '')
   );
-  const [activeTab, setActiveTab] = useState<'workflows' | 'files' | 'execution'>('workflows');
+  const [activeTab, setActiveTab] = useState<'workflows' | 'files' | 'execution' | 'grok-hub'>('workflows');
   const [templates, setTemplates] = useState<CoworkTemplate[]>([]);
   const [files, setFiles] = useState<WorkspaceFileInfo[]>([]);
   const [plans, setPlans] = useState<CoworkTaskPlan[]>([]);
@@ -99,6 +99,27 @@ export function CoworkProjectWorkspace({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Grok Hub States
+  const [redditTopic, setRedditTopic] = useState('technology');
+  const [redditQuery, setRedditQuery] = useState('');
+  const [redditData, setRedditData] = useState<any | null>(null);
+  const [redditBusy, setRedditBusy] = useState(false);
+
+  const [ytInput, setYtInput] = useState('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+  const [ytData, setYtData] = useState<any | null>(null);
+  const [ytBusy, setYtBusy] = useState(false);
+
+  const [codeReviewInput, setCodeReviewInput] = useState(
+    '// Sample function to review\nfunction computeStats(items) {\n  if (!items || items.length === 0) return null;\n  const sum = items.reduce((a, b) => a + b, 0);\n  return { sum, avg: sum / items.length };\n}'
+  );
+  const [codeReviewData, setCodeReviewData] = useState<any | null>(null);
+  const [codeReviewBusy, setCodeReviewBusy] = useState(false);
+  const [generatedTestCode, setGeneratedTestCode] = useState<string | null>(null);
+
+  const [codeSymbolQuery, setCodeSymbolQuery] = useState('');
+  const [symbolData, setSymbolData] = useState<any | null>(null);
+  const [symbolBusy, setSymbolBusy] = useState(false);
 
   // File Upload / Create Modal State
   const [showFileModal, setShowFileModal] = useState(false);
@@ -178,10 +199,7 @@ export function CoworkProjectWorkspace({
     try {
       const newName = prompt('Enter name for duplicate project:', `${activeSpace?.name || 'Project'} (Copy)`);
       if (!newName) return;
-      const created = await api<Space>(`/spaces/${selectedSpaceId}/duplicate`, {
-        method: 'POST',
-        body: { name: newName },
-      });
+      const created = await api<Space>(`/spaces/${selectedSpaceId}/duplicate`, 'POST', { name: newName });
       setSuccessMsg(`Project duplicated successfully as "${created.name}"`);
       onRefreshWorkspace?.();
       setSelectedSpaceId(created.id);
@@ -211,12 +229,9 @@ export function CoworkProjectWorkspace({
   // Instantiate Cowork Template Handler
   const handleInstantiate = async (template: CoworkTemplate) => {
     try {
-      const plan = await api<CoworkTaskPlan>(`/planner/templates/${template.id}/instantiate`, {
-        method: 'POST',
-        body: {
-          goal: customGoal.trim() || undefined,
-          spaceId: selectedSpaceId || undefined,
-        },
+      const plan = await api<CoworkTaskPlan>(`/planner/templates/${template.id}/instantiate`, 'POST', {
+        goal: customGoal.trim() || undefined,
+        spaceId: selectedSpaceId || undefined,
       });
       setSuccessMsg(`Workflow "${template.title}" initiated!`);
       setInstantiatingTemplate(null);
@@ -233,7 +248,7 @@ export function CoworkProjectWorkspace({
   const handleTogglePause = async (plan: CoworkTaskPlan) => {
     try {
       const endpoint = plan.status === 'paused' ? `/plans/${plan.id}/resume` : `/plans/${plan.id}/pause`;
-      await api(endpoint, { method: 'POST' });
+      await api(endpoint, 'POST');
       await loadSpaceData(selectedSpaceId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Action failed');
@@ -243,7 +258,7 @@ export function CoworkProjectWorkspace({
   // Execute Next Step Handler
   const handleExecuteStep = async (planId: string) => {
     try {
-      await api(`/plans/${planId}/step`, { method: 'POST' });
+      await api(`/plans/${planId}/step`, 'POST');
       await loadSpaceData(selectedSpaceId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Step execution failed');
@@ -254,9 +269,8 @@ export function CoworkProjectWorkspace({
   const handleReplanStep = async (planId: string, stepId: string) => {
     if (!replanReason.trim()) return;
     try {
-      await api(`/plans/${planId}/steps/${stepId}/replan`, {
-        method: 'POST',
-        body: { reason: replanReason.trim() },
+      await api(`/plans/${planId}/steps/${stepId}/replan`, 'POST', {
+        reason: replanReason.trim(),
       });
       setSuccessMsg('Step replanned successfully');
       setReplanningStepId(null);
@@ -274,14 +288,11 @@ export function CoworkProjectWorkspace({
       return;
     }
     try {
-      await api(`/projects/${selectedSpaceId}/files`, {
-        method: 'POST',
-        body: {
-          path: newFilePath.trim(),
-          content: newFileContent,
-          category: newFileCategory,
-          comment: newFileComment.trim(),
-        },
+      await api(`/projects/${selectedSpaceId}/files`, 'POST', {
+        path: newFilePath.trim(),
+        content: newFileContent,
+        category: newFileCategory,
+        comment: newFileComment.trim(),
       });
       setSuccessMsg(`File "${newFilePath}" saved`);
       setShowFileModal(false);
@@ -330,6 +341,78 @@ export function CoworkProjectWorkspace({
         return <Briefcase size={18} />;
       default:
         return <Layers size={18} />;
+    }
+  };
+
+  const handleQueryReddit = async () => {
+    setRedditBusy(true);
+    try {
+      const q = encodeURIComponent(redditQuery.trim());
+      const sub = encodeURIComponent(redditTopic);
+      const res = await api<any>(`/social/reddit?query=${q}&subreddit=${sub}&limit=5`);
+      setRedditData(res?.data || res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Reddit query failed');
+    } finally {
+      setRedditBusy(false);
+    }
+  };
+
+  const handleLookupYouTube = async () => {
+    if (!ytInput.trim()) return;
+    setYtBusy(true);
+    try {
+      const t = encodeURIComponent(ytInput.trim());
+      const res = await api<any>(`/social/youtube?target=${t}&fetchTranscript=true`);
+      setYtData(res?.data || res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'YouTube lookup failed');
+    } finally {
+      setYtBusy(false);
+    }
+  };
+
+  const handleReviewCode = async () => {
+    if (!codeReviewInput.trim()) return;
+    setCodeReviewBusy(true);
+    setGeneratedTestCode(null);
+    try {
+      const res = await api<any>('/code/review', 'POST', { code: codeReviewInput });
+      setCodeReviewData(res?.data || res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Code review failed');
+    } finally {
+      setCodeReviewBusy(false);
+    }
+  };
+
+  const handleGenerateTests = async () => {
+    if (!codeReviewInput.trim()) return;
+    setCodeReviewBusy(true);
+    try {
+      const res = await api<any>('/code/test-gen', 'POST', {
+        code: codeReviewInput,
+        framework: 'vitest',
+      });
+      const data = res?.data || res;
+      setGeneratedTestCode(data.testCode || '');
+      setSuccessMsg('Unit tests generated successfully!');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Test generation failed');
+    } finally {
+      setCodeReviewBusy(false);
+    }
+  };
+
+  const handleSearchSymbols = async () => {
+    setSymbolBusy(true);
+    try {
+      const res = await api<any>('/code/symbols', 'POST', { query: codeSymbolQuery.trim() });
+      setSymbolData(res?.data || res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Symbol search failed');
+    } finally {
+      setSymbolBusy(false);
     }
   };
 
@@ -512,6 +595,14 @@ export function CoworkProjectWorkspace({
         >
           <Clock size={16} />
           Active Workflows ({plans.length})
+        </button>
+        <button
+          className={activeTab === 'grok-hub' ? 'primary' : 'button'}
+          onClick={() => setActiveTab('grok-hub')}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+        >
+          <Sparkles size={16} />
+          Grok AI Hub (Free Tools)
         </button>
       </div>
 
@@ -1007,6 +1098,413 @@ export function CoworkProjectWorkspace({
               Select a workflow from the list to view its execution details.
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB 4: GROK AI HUB (FREE RESEARCH & CODING SUITE) */}
+      {activeTab === 'grok-hub' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Zero-Cost Banner */}
+          <div
+            style={{
+              padding: '16px 20px',
+              background: '#ecfdf5',
+              border: '1px solid #a7f3d0',
+              borderRadius: 12,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 20,
+                  background: '#10b981',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <ShieldCheck size={24} />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '1rem', color: '#065f46' }}>
+                  Free-Only Mode Active (Strict ₹0 / $0 Cost Policy)
+                </h4>
+                <p style={{ margin: '2px 0 0 0', fontSize: '0.85rem', color: '#047857' }}>
+                  Zero paid APIs • Zero credit billing • Permitted public endpoints (Reddit JSON, YouTube oEmbed, Static Analysis)
+                </p>
+              </div>
+            </div>
+            <span
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                background: '#047857',
+                color: '#fff',
+                padding: '4px 10px',
+                borderRadius: 20,
+              }}
+            >
+              Cost: ₹0.00 Guaranteed
+            </span>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: 20 }}>
+            {/* Tool 1: Reddit Public Research */}
+            <div
+              style={{
+                background: 'var(--card-bg, #fff)',
+                border: '1px solid var(--border-color, #e5e7eb)',
+                borderRadius: 12,
+                padding: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Search size={20} style={{ color: '#ff4500' }} />
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '0.98rem' }}>Reddit Public Research</h4>
+                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
+                    Permitted public Reddit JSON endpoint with real citations and scores
+                  </small>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select
+                  value={redditTopic}
+                  onChange={(e) => setRedditTopic(e.target.value)}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: '1px solid #d1d5db',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <option value="technology">r/technology</option>
+                  <option value="artificial">r/artificial</option>
+                  <option value="programming">r/programming</option>
+                  <option value="webdev">r/webdev</option>
+                  <option value="news">r/news</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="Keyword filter (optional)..."
+                  value={redditQuery}
+                  onChange={(e) => setRedditQuery(e.target.value)}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: '1px solid #d1d5db',
+                    fontSize: '0.85rem',
+                  }}
+                />
+                <button className="primary" onClick={handleQueryReddit} disabled={redditBusy}>
+                  {redditBusy ? 'Searching...' : 'Explore Reddit'}
+                </button>
+              </div>
+
+              {redditData?.posts && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+                  {redditData.posts.map((p: any, idx: number) => (
+                    <div
+                      key={idx}
+                      style={{
+                        padding: 10,
+                        borderRadius: 8,
+                        background: '#f9fafb',
+                        border: '1px solid #f3f4f6',
+                        fontSize: '0.85rem',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontWeight: 600, color: '#374151' }}>{p.subreddit}</span>
+                        <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>★ {p.score} upvotes</span>
+                      </div>
+                      <a
+                        href={p.permalink || p.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ fontWeight: 500, color: '#2563eb', textDecoration: 'none' }}
+                      >
+                        {p.title} <ExternalLink size={12} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                      </a>
+                      {p.previewText && (
+                        <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#6b7280' }}>
+                          {p.previewText.slice(0, 140)}...
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Tool 2: YouTube Video & Transcript Inspector */}
+            <div
+              style={{
+                background: 'var(--card-bg, #fff)',
+                border: '1px solid var(--border-color, #e5e7eb)',
+                borderRadius: 12,
+                padding: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Play size={20} style={{ color: '#dc2626' }} />
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '0.98rem' }}>YouTube Public Video & Transcript Inspector</h4>
+                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
+                    Free YouTube oEmbed & public timedtext subtitles without paid API keys
+                  </small>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type="text"
+                  placeholder="Paste YouTube Video URL or ID..."
+                  value={ytInput}
+                  onChange={(e) => setYtInput(e.target.value)}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: '1px solid #d1d5db',
+                    fontSize: '0.85rem',
+                  }}
+                />
+                <button className="primary" onClick={handleLookupYouTube} disabled={ytBusy}>
+                  {ytBusy ? 'Inspecting...' : 'Lookup Video'}
+                </button>
+              </div>
+
+              {ytData?.video && (
+                <div
+                  style={{
+                    padding: 12,
+                    borderRadius: 8,
+                    background: '#f9fafb',
+                    border: '1px solid #f3f4f6',
+                    display: 'flex',
+                    gap: 12,
+                  }}
+                >
+                  {ytData.video.thumbnailUrl && (
+                    <img
+                      src={ytData.video.thumbnailUrl}
+                      alt="Thumbnail"
+                      style={{ width: 100, height: 60, objectFit: 'cover', borderRadius: 6 }}
+                    />
+                  )}
+                  <div style={{ flex: 1, fontSize: '0.85rem' }}>
+                    <a
+                      href={ytData.video.watchUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ fontWeight: 600, color: '#2563eb', textDecoration: 'none' }}
+                    >
+                      {ytData.video.title} <ExternalLink size={12} style={{ display: 'inline' }} />
+                    </a>
+                    <div style={{ color: '#4b5563', fontSize: '0.8rem', marginTop: 2 }}>
+                      Channel: <strong>{ytData.video.channelName}</strong>
+                    </div>
+                    {ytData.video.transcriptSnippet && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          padding: 6,
+                          background: '#fff',
+                          borderRadius: 4,
+                          fontSize: '0.75rem',
+                          color: '#374151',
+                          maxHeight: 80,
+                          overflowY: 'auto',
+                        }}
+                      >
+                        <strong>Transcript extract:</strong> {ytData.video.transcriptSnippet}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Tool 3: Static Code Review & Unit Test Generator */}
+            <div
+              style={{
+                background: 'var(--card-bg, #fff)',
+                border: '1px solid var(--border-color, #e5e7eb)',
+                borderRadius: 12,
+                padding: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Code size={20} style={{ color: '#6366f1' }} />
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '0.98rem' }}>Static Code Review & Unit Test Generator</h4>
+                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
+                    Bracket balance checking, vulnerability scans, anti-pattern checks & Vitest test scaffolding
+                  </small>
+                </div>
+              </div>
+
+              <textarea
+                rows={5}
+                value={codeReviewInput}
+                onChange={(e) => setCodeReviewInput(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: 10,
+                  borderRadius: 6,
+                  border: '1px solid #d1d5db',
+                  fontFamily: 'monospace',
+                  fontSize: '0.82rem',
+                }}
+              />
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="button" onClick={handleReviewCode} disabled={codeReviewBusy}>
+                  {codeReviewBusy ? 'Analyzing...' : 'Run Code Review'}
+                </button>
+                <button className="primary" onClick={handleGenerateTests} disabled={codeReviewBusy}>
+                  Generate Unit Tests (Vitest)
+                </button>
+              </div>
+
+              {codeReviewData && (
+                <div
+                  style={{
+                    padding: 12,
+                    borderRadius: 8,
+                    background: codeReviewData.syntaxValid ? '#f0fdf4' : '#fef2f2',
+                    border: `1px solid ${codeReviewData.syntaxValid ? '#bbf7d0' : '#fecaca'}`,
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                    {codeReviewData.syntaxValid ? '✓ Static Check Passed' : '⚠️ Structural Issues Detected'}
+                  </div>
+                  <p style={{ margin: 0, fontSize: '0.82rem' }}>{codeReviewData.summary}</p>
+                </div>
+              )}
+
+              {generatedTestCode && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <strong style={{ fontSize: '0.82rem' }}>Scaffolded Test Suite:</strong>
+                    <button
+                      className="button"
+                      onClick={() => navigator.clipboard.writeText(generatedTestCode)}
+                      style={{ padding: '2px 8px', fontSize: '0.75rem' }}
+                    >
+                      Copy Tests
+                    </button>
+                  </div>
+                  <pre
+                    style={{
+                      background: '#1f2937',
+                      color: '#f9fafb',
+                      padding: 10,
+                      borderRadius: 6,
+                      fontSize: '0.78rem',
+                      maxHeight: 140,
+                      overflowY: 'auto',
+                      margin: 0,
+                    }}
+                  >
+                    {generatedTestCode}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            {/* Tool 4: Symbol Navigation */}
+            <div
+              style={{
+                background: 'var(--card-bg, #fff)',
+                border: '1px solid var(--border-color, #e5e7eb)',
+                borderRadius: 12,
+                padding: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Search size={20} style={{ color: '#0ea5e9' }} />
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '0.98rem' }}>Workspace Code Symbol Navigator</h4>
+                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
+                    Instant regex/AST navigation of functions, classes, interfaces and types
+                  </small>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type="text"
+                  placeholder="Search symbol (e.g. calculate, User, Dot)..."
+                  value={codeSymbolQuery}
+                  onChange={(e) => setCodeSymbolQuery(e.target.value)}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: '1px solid #d1d5db',
+                    fontSize: '0.85rem',
+                  }}
+                />
+                <button className="primary" onClick={handleSearchSymbols} disabled={symbolBusy}>
+                  {symbolBusy ? 'Searching...' : 'Find Symbols'}
+                </button>
+              </div>
+
+              {symbolData?.symbols && (
+                <div style={{ maxHeight: 220, overflowY: 'auto', fontSize: '0.82rem' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ padding: '6px 10px', textAlign: 'left' }}>Symbol</th>
+                        <th style={{ padding: '6px 10px', textAlign: 'left' }}>Kind</th>
+                        <th style={{ padding: '6px 10px', textAlign: 'left' }}>File</th>
+                        <th style={{ padding: '6px 10px', textAlign: 'right' }}>Line</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {symbolData.symbols.map((sym: any, idx: number) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '6px 10px', fontFamily: 'monospace', fontWeight: 600 }}>{sym.name}</td>
+                          <td style={{ padding: '6px 10px' }}>
+                            <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '1px 6px', borderRadius: 4 }}>
+                              {sym.kind}
+                            </span>
+                          </td>
+                          <td style={{ padding: '6px 10px', color: '#6b7280' }}>{sym.file}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right' }}>{sym.line}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

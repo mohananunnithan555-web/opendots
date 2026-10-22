@@ -15,6 +15,8 @@ export interface Settings {
   approvalPolicy?: 'always_ask' | 'category_based' | 'pre_authorized';
   proactiveGoalsAllowed?: boolean;
   disabledMemoryCategories?: string[];
+  /** Grok Upgrade: Strictly prevents paid API calls, credit-based services, or subscription billing (default: true). */
+  freeOnlyMode?: boolean;
 }
 
 export interface GoalMilestone {

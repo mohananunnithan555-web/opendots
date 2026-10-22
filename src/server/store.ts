@@ -49,6 +49,7 @@ const defaults: Settings = {
   approvalPolicy: 'always_ask',
   proactiveGoalsAllowed: true,
   disabledMemoryCategories: [],
+  freeOnlyMode: true,
 };
 export class Store {
   private db: DatabaseSync;
