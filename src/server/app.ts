@@ -1980,49 +1980,21 @@ export function createApp({
     return c.json({ parsed });
   });
 
-  app.get('/api/reminders/:id', async (c) => {
-    const id = c.req.param('id');
-    const reminder = store.getReminder(id);
-    if (!reminder) return c.json({ error: 'Reminder not found.' }, 404);
-    return c.json({ reminder });
-  });
-
-  app.put('/api/reminders/:id', async (c) => {
-    const id = c.req.param('id');
-    const reminder = store.getReminder(id);
-    if (!reminder) return c.json({ error: 'Reminder not found.' }, 404);
-    const body = await c.req.json().catch(() => ({}));
-    const updated = store.updateReminder(id, body);
-    return c.json({ reminder: updated });
-  });
-
-  app.delete('/api/reminders/:id', async (c) => {
-    const id = c.req.param('id');
-    const success = store.deleteReminder(id);
-    if (!success) return c.json({ error: 'Reminder not found.' }, 404);
-    return c.json({ success: true });
-  });
-
-  app.post('/api/reminders/:id/snooze', async (c) => {
-    const id = c.req.param('id');
-    const body = await c.req.json().catch(() => ({}));
-    const minutes = Number(body.minutes) || 10;
-    const snoozed = store.snoozeReminder(id, minutes);
-    if (!snoozed) return c.json({ error: 'Reminder not found.' }, 404);
-    return c.json({ reminder: snoozed, snoozedMinutes: minutes });
-  });
-
-  app.post('/api/reminders/:id/complete', async (c) => {
-    const id = c.req.param('id');
-    const updated = store.updateReminder(id, { status: 'completed' });
-    if (!updated) return c.json({ error: 'Reminder not found.' }, 404);
-    return c.json({ reminder: updated });
-  });
-
-  // VAPID & Push Notification endpoints
+  // VAPID & Push Notification endpoints (must be defined BEFORE /:id to avoid route collision)
   app.get('/api/reminders/vapid-public-key', async (c) => {
     const publicKey = reminderService.getPushService().getPublicKey();
     return c.json({ publicKey });
+  });
+
+  app.get('/api/reminders/tick', async (c) => {
+    // Allows external keepalive cron / UptimeRobot to trigger due checks
+    const count = await reminderService.triggerDueReminders();
+    return c.json({
+      success: true,
+      triggeredCount: count,
+      now: Date.now(),
+      istTime: new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }),
+    });
   });
 
   app.post('/api/reminders/subscribe', async (c) => {
@@ -2071,15 +2043,44 @@ export function createApp({
     return c.json({ success: true, pushResult: result });
   });
 
-  app.get('/api/reminders/tick', async (c) => {
-    // Allows external keepalive cron / UptimeRobot to trigger due checks
-    const count = await reminderService.triggerDueReminders();
-    return c.json({
-      success: true,
-      triggeredCount: count,
-      now: Date.now(),
-      istTime: new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }),
-    });
+  // Parameterized /:id routes
+  app.get('/api/reminders/:id', async (c) => {
+    const id = c.req.param('id');
+    const reminder = store.getReminder(id);
+    if (!reminder) return c.json({ error: 'Reminder not found.' }, 404);
+    return c.json({ reminder });
+  });
+
+  app.put('/api/reminders/:id', async (c) => {
+    const id = c.req.param('id');
+    const reminder = store.getReminder(id);
+    if (!reminder) return c.json({ error: 'Reminder not found.' }, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const updated = store.updateReminder(id, body);
+    return c.json({ reminder: updated });
+  });
+
+  app.delete('/api/reminders/:id', async (c) => {
+    const id = c.req.param('id');
+    const success = store.deleteReminder(id);
+    if (!success) return c.json({ error: 'Reminder not found.' }, 404);
+    return c.json({ success: true });
+  });
+
+  app.post('/api/reminders/:id/snooze', async (c) => {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const minutes = Number(body.minutes) || 10;
+    const snoozed = store.snoozeReminder(id, minutes);
+    if (!snoozed) return c.json({ error: 'Reminder not found.' }, 404);
+    return c.json({ reminder: snoozed, snoozedMinutes: minutes });
+  });
+
+  app.post('/api/reminders/:id/complete', async (c) => {
+    const id = c.req.param('id');
+    const updated = store.updateReminder(id, { status: 'completed' });
+    if (!updated) return c.json({ error: 'Reminder not found.' }, 404);
+    return c.json({ reminder: updated });
   });
 
   app.onError((error, c) => {
