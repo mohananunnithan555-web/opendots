@@ -4324,3 +4324,19 @@ button.icon-button.on-call {
   border-color: rgba(229, 62, 62, 0.3);
 }
 
+button.icon-button.voice-typing-btn.listening {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.15);
+  border-color: #dc2626;
+  animation: call-breathe 1.5s infinite;
+}
+
+button.icon-button.voice-typing-btn.unsupported {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.voice-dictation-active-pill {
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.12);
+}
+

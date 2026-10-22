@@ -3,12 +3,55 @@
 import { api } from './api';
 
 export function getSpeechRecognition(): any {
-  if (typeof window === 'undefined') return null;
+  const root =
+    typeof window !== 'undefined'
+      ? window
+      : typeof globalThis !== 'undefined'
+      ? globalThis
+      : null;
+  if (!root) return null;
   return (
-    (window as any).SpeechRecognition ||
-    (window as any).webkitSpeechRecognition ||
+    (root as any).SpeechRecognition ||
+    (root as any).webkitSpeechRecognition ||
     null
   );
+}
+
+export function isSpeechRecognitionSupported(): boolean {
+  return getSpeechRecognition() !== null;
+}
+
+/**
+ * Safely request and verify microphone hardware permission.
+ * Immediately closes the test stream tracks to free up the device.
+ */
+export async function requestMicrophonePermission(): Promise<{ granted: boolean; error?: string }> {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    return { granted: true };
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((track) => track.stop());
+    return { granted: true };
+  } catch (err) {
+    const name = err instanceof Error ? err.name : String(err);
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      return {
+        granted: false,
+        error: 'Microphone permission was denied. Please allow microphone access in your browser site settings.',
+      };
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      return {
+        granted: false,
+        error: 'No microphone hardware found on your device. Please plug in or enable an audio input device.',
+      };
+    }
+    return {
+      granted: false,
+      error: `Could not access microphone: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }
 
 export function cleanForSpeech(text: string): string {

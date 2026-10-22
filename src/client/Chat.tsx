@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { ImageModal } from './ImageModal';
 import { getSpeechRecognition } from './speech';
+import { useDictation } from './useDictation';
 import {
   ComputerToolCard,
   type ComputerToolRenderProps,
@@ -182,51 +183,14 @@ export function Chat({
     onVoiceTurn,
   );
 
-  const [isDictating, setIsDictating] = useState(false);
-  const dictationRef = useRef<any>(null);
-
-  const toggleDictation = () => {
-    const SpeechRecognition = getSpeechRecognition();
-    if (!SpeechRecognition) {
-      setError(
-        'Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.',
-      );
-      return;
-    }
-    if (isDictating) {
-      try {
-        dictationRef.current?.stop();
-      } catch {}
-      setIsDictating(false);
-      return;
-    }
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = navigator.language || 'en-US';
-      recognition.onresult = (event: any) => {
-        let words = '';
-        for (let i = 0; i < event.results.length; i++) {
-          words += event.results[i][0].transcript;
-        }
-        if (words) {
-          setDraft((prev) => (prev ? `${prev} ${words}` : words));
-        }
-      };
-      recognition.onend = () => {
-        setIsDictating(false);
-      };
-      recognition.onerror = () => {
-        setIsDictating(false);
-      };
-      recognition.start();
-      dictationRef.current = recognition;
-      setIsDictating(true);
-    } catch {
-      setIsDictating(false);
-    }
-  };
+  const dictation = useDictation({
+    onTranscriptChange: (text) => {
+      setDraft(text);
+    },
+    onError: (err) => {
+      setError(err);
+    },
+  });
   const sent = useRef(false);
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -312,8 +276,11 @@ export function Chat({
     bottom.current?.scrollIntoView({ behavior: 'instant', block: 'end' });
   }, [agent.messages.length, running]);
   useEffect(() => {
-    if (paused && voice.status !== 'idle') void voice.end();
-  }, [paused]);
+    if (paused) {
+      if (voice.status !== 'idle') void voice.end();
+      if (dictation.isListening) dictation.stop();
+    }
+  }, [paused, dictation.isListening]);
   useHumanInTheLoop(
     {
       name: pageReviewTool.name,
@@ -534,6 +501,9 @@ export function Chat({
         className="chat-composer"
         onSubmit={(e) => {
           e.preventDefault();
+          if (dictation.isListening) {
+            dictation.stop();
+          }
           const modeInstruction =
             grokMode === 'think'
               ? '[GROK THINK MODE: Write your step-by-step reasoning scratchpad in <thought>...</thought> tags, then provide the final verified response.]\n'
@@ -614,6 +584,78 @@ export function Chat({
             </button>
           </div>
         )}
+        {/* Voice Dictation Live Indicators */}
+        {dictation.isListening && (
+          <div
+            className="voice-dictation-active-pill"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '6px 12px',
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              color: '#991b1b',
+              borderRadius: 8,
+              fontSize: '0.8rem',
+              marginBottom: 8,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: '#dc2626',
+                  display: 'inline-block',
+                  animation: 'pulse-read 1s infinite',
+                }}
+              />
+              <span>
+                <strong>Listening…</strong> Speak clearly into your microphone
+                {dictation.interimSnippet ? `: "${dictation.interimSnippet}"` : ''}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => dictation.stop()}
+              style={{
+                background: '#dc2626',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: 4,
+                padding: '2px 8px',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Done
+            </button>
+          </div>
+        )}
+
+        {dictation.status === 'requesting-permission' && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '6px 12px',
+              background: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              color: '#1e40af',
+              borderRadius: 8,
+              fontSize: '0.8rem',
+              marginBottom: 8,
+            }}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#2563eb', display: 'inline-block' }} />
+            <span>Please allow microphone access in your browser prompt…</span>
+          </div>
+        )}
+
         <div className="chat-compose-row">
           <button
             type="button"
@@ -625,17 +667,33 @@ export function Chat({
           </button>
           <button
             type="button"
-            className={`icon-button ${isDictating ? 'on-call' : ''}`}
-            aria-label={isDictating ? 'Stop voice typing' : 'Voice typing'}
+            className={`icon-button voice-typing-btn ${dictation.isListening ? 'on-call listening' : ''} ${!dictation.isSupported ? 'unsupported' : ''}`}
+            aria-label={
+              !dictation.isSupported
+                ? 'Voice typing unsupported in this browser'
+                : dictation.isListening
+                ? 'Stop voice typing'
+                : 'Voice typing (dictate message)'
+            }
             title={
-              isDictating
-                ? 'Listening… click to stop'
+              !dictation.isSupported
+                ? 'Speech recognition is not supported in this browser (supported in Chrome, Edge, Safari)'
+                : dictation.isListening
+                ? 'Listening… Click to finish voice typing'
                 : 'Voice typing (dictate your message)'
             }
-            onClick={toggleDictation}
+            onClick={() => {
+              if (!dictation.isSupported) {
+                setError(
+                  'Speech recognition is not supported in this browser. Please use Chrome, Edge, Safari, or an Android/iOS browser.',
+                );
+                return;
+              }
+              void dictation.toggle(draft);
+            }}
             disabled={running || paused || !loaded || !contextReady}
           >
-            {isDictating ? <MicOff size={19} /> : <Mic size={19} />}
+            {dictation.isListening ? <Square size={16} fill="currentColor" /> : <Mic size={19} />}
           </button>
           <button
             type="button"
