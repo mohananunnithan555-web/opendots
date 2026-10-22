@@ -18,6 +18,7 @@ import {
   Code2,
   BookOpen,
   CheckSquare,
+  Sparkles,
 } from 'lucide-react';
 import { api } from './api';
 import type { Connector, ConnectorType } from '../shared/types';
@@ -115,6 +116,8 @@ export function ConnectorsHub() {
         return <BookOpen className="w-5 h-5 text-slate-800 dark:text-slate-200" />;
       case 'asana':
         return <CheckSquare className="w-5 h-5 text-rose-500" />;
+      case 'venice':
+        return <Sparkles className="w-5 h-5 text-amber-500" />;
       default:
         return <Plug className="w-5 h-5 text-indigo-500" />;
     }

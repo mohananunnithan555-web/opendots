@@ -10,3 +10,4 @@ export * from './builtin/execution-report.js';
 export * from './builtin/step-verifier.js';
 export * from './builtin/workspace-google-tools.js';
 export * from '../files/file-tools.js';
+export * from '../venice/venice-tools.js';

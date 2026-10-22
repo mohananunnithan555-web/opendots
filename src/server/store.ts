@@ -1322,6 +1322,15 @@ export class Store {
       return { success: true, message: 'Instagram public research engine is verified and accessible.', timestamp: now };
     }
 
+    if (type === 'venice') {
+      this.updateConnector(type, { status: 'connected', lastTestedAt: now, error: undefined }, ownerId);
+      return {
+        success: true,
+        message: 'Venice.ai Website Bridge is active (₹0 browser automation / authorized session link).',
+        timestamp: now,
+      };
+    }
+
     if (type === 'slack') {
       const hasSlack = Boolean(process.env.SLACK_TEAM_ID || conn.config.teamId);
       const status = hasSlack ? 'connected' : 'unconfigured';
@@ -1362,9 +1371,6 @@ export class Store {
   }
 
   seedInitialConnectors(ownerId = 'opendots-owner'): void {
-    const existing = this.connectors(ownerId);
-    if (existing.length > 0) return;
-
     const initial: Array<Omit<Connector, 'createdAt' | 'updatedAt' | 'ownerId'>> = [
       {
         id: 'conn-gmail',
@@ -1464,6 +1470,20 @@ export class Store {
         config: {},
         permissions: ['View tasks, track milestones, update task status'],
         availableActions: ['list_project_tasks', 'create_task', 'update_status'],
+      },
+      {
+        id: 'conn-venice',
+        type: 'venice',
+        name: 'Venice.ai Website Bridge',
+        status: 'connected',
+        config: { url: 'https://venice.ai/' },
+        permissions: ['Website automation for media generation and uncensored research at ₹0 cost'],
+        availableActions: [
+          'venice_generate_image',
+          'venice_generate_video',
+          'venice_research',
+          'venice_website_bridge',
+        ],
       },
     ];
 

@@ -45,6 +45,12 @@ import {
   generateSlideDeckTool,
   diffDocumentsTool,
 } from '../files/file-tools.js';
+import {
+  veniceWebsiteBridgeTool,
+  veniceImageTool,
+  veniceVideoTool,
+  veniceResearchTool,
+} from '../venice/venice-tools.js';
 
 export class ToolRegistry {
   private tools = new Map<string, OpenDotsToolDefinition<any, any>>();
@@ -141,3 +147,7 @@ globalToolRegistry.register(unitTestGeneratorTool);
 globalToolRegistry.register(codeSymbolsTool);
 globalToolRegistry.register(codeSandboxTool);
 globalToolRegistry.register(perspectiveMatrixTool);
+globalToolRegistry.register(veniceWebsiteBridgeTool);
+globalToolRegistry.register(veniceImageTool);
+globalToolRegistry.register(veniceVideoTool);
+globalToolRegistry.register(veniceResearchTool);

@@ -50,6 +50,7 @@ import {
   type ImageAspectRatio,
   type ImageStyle,
 } from './image-config.js';
+import { globalVeniceBridge } from './venice/venice-website-bridge.js';
 const interval = z.number().int().min(60).max(31_536_000).nullable();
 export interface AppOptions {
   store: Store;
@@ -1237,6 +1238,48 @@ export function createApp({
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Disconnect failed.' }, 400);
     }
+  });
+
+  // -------------------------------------------------------------
+  // VENICE.AI WEBSITE BRIDGE (₹0 Browser-Based Integration)
+  // -------------------------------------------------------------
+  app.get('/api/venice/status', async (c) => {
+    const status = await globalVeniceBridge.getStatus();
+    return c.json(status);
+  });
+
+  app.post('/api/venice/execute', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.type || !body.prompt) {
+      return c.json({ error: 'type and prompt are required.' }, 400);
+    }
+
+    try {
+      const result = await globalVeniceBridge.executeTask({
+        type: body.type,
+        prompt: body.prompt,
+        settings: body.settings,
+        ownerId: 'opendots-owner',
+      });
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Venice execution failed.' }, 500);
+    }
+  });
+
+  app.get('/api/venice/tasks/:taskId', (c) => {
+    const taskId = c.req.param('taskId');
+    const task = globalVeniceBridge.getTask(taskId);
+    if (!task) {
+      return c.json({ error: 'Task not found.' }, 404);
+    }
+    return c.json(task);
+  });
+
+  app.post('/api/venice/tasks/:taskId/cancel', (c) => {
+    const taskId = c.req.param('taskId');
+    const cancelled = globalVeniceBridge.cancelTask(taskId);
+    return c.json({ cancelled });
   });
 
   // -------------------------------------------------------------

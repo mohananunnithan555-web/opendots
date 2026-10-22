@@ -495,6 +495,33 @@ export function ChatTranscript({
                     ) {
                       return <ChatVideo src={href} title={String(children)} />;
                     }
+                    if (href && href.includes('venice.ai')) {
+                      return (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '4px 10px',
+                            margin: '4px 0',
+                            borderRadius: '8px',
+                            border: '1px solid #f59e0b',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            color: 'inherit',
+                            fontWeight: 500,
+                            textDecoration: 'none',
+                            fontSize: '12px',
+                          }}
+                        >
+                          <Sparkles size={13} style={{ color: '#f59e0b' }} />
+                          <span>{children}</span>
+                          <ExternalLink size={12} style={{ opacity: 0.7 }} />
+                        </a>
+                      );
+                    }
                     return (
                       <a
                         onClick={(event) => {
