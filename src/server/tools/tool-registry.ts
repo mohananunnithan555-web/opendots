@@ -12,6 +12,14 @@ import { shoppingResearchTool } from './builtin/shopping-research.js';
 import { instagramResearchTool } from './builtin/instagram-research.js';
 import { executionReportTool } from './builtin/execution-report.js';
 import { stepVerifierTool } from './builtin/step-verifier.js';
+import {
+  gmailWorkspaceTool,
+  calendarTasksWorkspaceTool,
+  docsDriveWorkspaceTool,
+  sheetsAnalyticsWorkspaceTool,
+  slidesPresentationWorkspaceTool,
+  keepNotesWorkspaceTool,
+} from './builtin/workspace-google-tools.js';
 import { deepResearchTool } from '../research/research-tool.js';
 import { delegateToSpecialistTool } from '../specialists/specialist-tools.js';
 import {
@@ -97,3 +105,9 @@ globalToolRegistry.register(readWorkspaceFileTool);
 globalToolRegistry.register(writeWorkspaceFileTool);
 globalToolRegistry.register(listWorkspaceFilesTool);
 globalToolRegistry.register(exportDocumentTool);
+globalToolRegistry.register(gmailWorkspaceTool);
+globalToolRegistry.register(calendarTasksWorkspaceTool);
+globalToolRegistry.register(docsDriveWorkspaceTool);
+globalToolRegistry.register(sheetsAnalyticsWorkspaceTool);
+globalToolRegistry.register(slidesPresentationWorkspaceTool);
+globalToolRegistry.register(keepNotesWorkspaceTool);

@@ -29,9 +29,13 @@ export interface ResearchReport {
   query: string;
   summary: string;
   keyFindings: string[];
+  verifiedFacts?: string[];
+  conflictingClaims?: string[];
   comparisons: string[];
   uncertainties: string[];
   citations: CitationItem[];
+  comparisonTableMarkdown?: string;
+  savedDeliverablePath?: string;
   markdownReport: string;
   sources: ResearchSource[];
   generatedAt: number;

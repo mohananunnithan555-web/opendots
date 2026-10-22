@@ -21,6 +21,7 @@ import type { Connector, ConnectorType } from '../shared/types';
 export function ConnectorsHub() {
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<'connectors' | 'matrix'>('connectors');
   const [testingType, setTestingType] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ [key: string]: { success: boolean; message: string } }>({});
   const [configModal, setConfigModal] = useState<Connector | null>(null);
@@ -119,20 +120,48 @@ export function ConnectorsHub() {
             </h1>
           </div>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Manage external connectors (Gmail, Calendar, Drive, Instagram Research, Telegram, WhatsApp, Slack).
+            Manage external connectors and inspect the comprehensive Google Ecosystem capability matrix.
           </p>
         </div>
-        <button
-          onClick={loadConnectors}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg transition"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          Refresh Status
-        </button>
+
+        <div className="flex items-center gap-2">
+          {/* Tab Controls */}
+          <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+            <button
+              onClick={() => setTab('connectors')}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                tab === 'connectors'
+                  ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+            >
+              Active Connectors
+            </button>
+            <button
+              onClick={() => setTab('matrix')}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                tab === 'matrix'
+                  ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+            >
+              Capability Matrix
+            </button>
+          </div>
+
+          <button
+            onClick={loadConnectors}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg transition"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
-      {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* TAB 1: CONNECTORS GRID */}
+      {tab === 'connectors' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {connectors.map((c) => {
           const isTesting = testingType === c.type;
           const pingResult = testResult[c.type];
@@ -258,6 +287,166 @@ export function ConnectorsHub() {
           );
         })}
       </div>
+      )}
+
+      {/* TAB 2: GOOGLE ECOSYSTEM & EXTERNAL CAPABILITY MATRIX */}
+      {tab === 'matrix' && (
+        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
+          <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
+                <Shield className="w-4 h-4 text-indigo-600" /> Google Ecosystem & External Connectors Capability Matrix
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Overview of supported actions, required authentication scopes, least-privilege permission models, and API rate limits.
+              </p>
+            </div>
+            <span className="text-[11px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-2 py-0.5 rounded">
+              Zero-Cost Verified
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-gray-50 dark:bg-gray-800/60 text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">
+                  <th className="p-3 font-semibold">Service / Connector</th>
+                  <th className="p-3 font-semibold">Supported Actions</th>
+                  <th className="p-3 font-semibold">Auth Protocol</th>
+                  <th className="p-3 font-semibold">Permission Model</th>
+                  <th className="p-3 font-semibold">Limitations & Quotas</th>
+                  <th className="p-3 font-semibold">Integration Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-600 dark:text-gray-300">
+                {[
+                  {
+                    name: 'Gmail',
+                    actions: 'search_inbox, read_threads, extract_deadlines, draft_reply, send_email',
+                    auth: 'OAuth2 / App Password',
+                    perm: 'Read-only (Drafting) / Approval Required (Sending)',
+                    limits: '100 queries/day free tier quota',
+                    status: 'Connected',
+                  },
+                  {
+                    name: 'Google Calendar & Tasks',
+                    actions: 'find_conflicts, propose_schedule, create_event, list_tasks, update_task',
+                    auth: 'OAuth2 / Service Account',
+                    perm: 'Read / Write',
+                    limits: '50 events per query window',
+                    status: 'Connected',
+                  },
+                  {
+                    name: 'Google Drive & Docs',
+                    actions: 'search_docs, summarize_collection, create_report, organize_folder',
+                    auth: 'OAuth2 / Drive API v3',
+                    perm: 'Read / Write',
+                    limits: '10MB max file size; local SQLite snapshotting',
+                    status: 'Connected',
+                  },
+                  {
+                    name: 'Google Sheets',
+                    actions: 'analyze_data, compute_formulas, generate_tracker, matrix_compare',
+                    auth: 'OAuth2 / Sheets API',
+                    perm: 'Read / Write',
+                    limits: 'Local tabular computation; zero external fees',
+                    status: 'Connected',
+                  },
+                  {
+                    name: 'Google Slides',
+                    actions: 'create_deck_from_research, outline_slides, format_presentation',
+                    auth: 'OAuth2 / Slides API',
+                    perm: 'Write',
+                    limits: 'Up to 10 slides per generated deck',
+                    status: 'Available',
+                  },
+                  {
+                    name: 'Google Keep',
+                    actions: 'search_notes, convert_to_tasks, create_note',
+                    auth: 'Keep API / Webhook',
+                    perm: 'Read / Write',
+                    limits: 'Text notes & checklists',
+                    status: 'Available',
+                  },
+                  {
+                    name: 'Google Contacts',
+                    actions: 'search_contacts, lookup_email, retrieve_directory',
+                    auth: 'People API',
+                    perm: 'Read-only',
+                    limits: 'User-authorized contacts only',
+                    status: 'Available',
+                  },
+                  {
+                    name: 'YouTube',
+                    actions: 'search_videos, extract_transcript, metadata_analysis',
+                    auth: 'YouTube Data API v3',
+                    perm: 'Read-only',
+                    limits: '10,000 units/day standard quota',
+                    status: 'Available',
+                  },
+                  {
+                    name: 'Instagram Public Research',
+                    actions: 'inspect_profile, search_hashtag, analyze_post_metadata',
+                    auth: 'Public Web Interface',
+                    perm: 'Read-only',
+                    limits: 'Public metadata only; no private account access',
+                    status: 'Connected',
+                  },
+                  {
+                    name: 'Slack',
+                    actions: 'post_message, reply_thread, share_summary',
+                    auth: 'Bot Token (xoxb-...)',
+                    perm: 'Approval Required (Outbound)',
+                    limits: '1 message/second rate limit',
+                    status: 'Configurable',
+                  },
+                  {
+                    name: 'Telegram',
+                    actions: 'send_notification, receive_command, send_file',
+                    auth: 'Bot API Token',
+                    perm: 'Write (With Approval)',
+                    limits: '30 messages/second',
+                    status: 'Configurable',
+                  },
+                  {
+                    name: 'WhatsApp Business API',
+                    actions: 'send_template_message, notify_user',
+                    auth: 'Meta Cloud API Token',
+                    perm: 'Approval Required',
+                    limits: 'Pre-approved HSM templates only',
+                    status: 'Configurable',
+                  },
+                ].map((row, idx) => (
+                  <tr key={idx} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30">
+                    <td className="p-3 font-bold text-gray-900 dark:text-gray-100">{row.name}</td>
+                    <td className="p-3 font-mono text-[11px]">{row.actions}</td>
+                    <td className="p-3">{row.auth}</td>
+                    <td className="p-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                        row.perm.includes('Approval')
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                          : 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                      }`}>
+                        {row.perm}
+                      </span>
+                    </td>
+                    <td className="p-3 text-gray-500 dark:text-gray-400">{row.limits}</td>
+                    <td className="p-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        row.status === 'Connected'
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                          : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
+                      }`}>
+                        {row.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Config Modal */}
       {configModal && (

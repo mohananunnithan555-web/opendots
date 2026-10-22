@@ -8,3 +8,4 @@ export * from './builtin/shopping-research.js';
 export * from './builtin/instagram-research.js';
 export * from './builtin/execution-report.js';
 export * from './builtin/step-verifier.js';
+export * from './builtin/workspace-google-tools.js';

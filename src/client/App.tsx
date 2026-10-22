@@ -27,6 +27,9 @@ import {
   Target,
   ShieldAlert,
   Plug,
+  Bell,
+  Sparkles,
+  Boxes,
 } from 'lucide-react';
 import type {
   Conversation,
@@ -60,6 +63,9 @@ import { ActivityCenter } from './ActivityCenter';
 import { GoalsDashboard } from './GoalsDashboard';
 import { ApprovalCenter } from './ApprovalCenter';
 import { ConnectorsHub } from './ConnectorsHub';
+import { NotificationCenter } from './NotificationCenter';
+import { SetupAssistantModal } from './SetupAssistantModal';
+import { McpDirectoryModal } from './McpDirectoryModal';
 
 function describeFailure(error: unknown, fallback: string) {
   return {
@@ -79,6 +85,10 @@ export function App() {
   >('chat');
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
   const [skillModalOpen, setSkillModalOpen] = useState(false);
+  const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
+  const [setupAssistantOpen, setSetupAssistantOpen] = useState(false);
+  const [mcpDirectoryOpen, setMcpDirectoryOpen] = useState(false);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [activityTab, setActivityTab] = useState<'plans' | 'scheduled'>('plans');
   const dirtyPage = useRef(false);
   const [spaceId, setSpaceId] = useState('');
@@ -146,6 +156,14 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState('');
   const [taskDetail, setTaskDetail] = useState<Detail>();
+  const refreshUnreadCount = useCallback(async () => {
+    try {
+      const res = await api<{ unreadCount: number }>('/notifications/unread-count');
+      setUnreadNotifications(res.unreadCount);
+    } catch {
+      // ignore
+    }
+  }, []);
   const refresh = useCallback(async () => {
     try {
       const [s, w] = await Promise.all([
@@ -157,6 +175,7 @@ export function App() {
       setNeedsAuth(false);
       setSelectedDot((previous) => previous || w.dots[0]?.id || '');
       setNotices((current) => applyRefreshResult(current, { ok: true }));
+      void refreshUnreadCount();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setNeedsAuth(true);
       setNotices((current) =>
@@ -563,6 +582,26 @@ export function App() {
           </button>
           <button
             className="nav-item"
+            onClick={() => {
+              setSetupAssistantOpen(true);
+              setMobile(false);
+            }}
+          >
+            <Sparkles size={17} />
+            <span>Spark Assistant</span>
+          </button>
+          <button
+            className="nav-item"
+            onClick={() => {
+              setMcpDirectoryOpen(true);
+              setMobile(false);
+            }}
+          >
+            <Boxes size={17} />
+            <span>MCP Directory</span>
+          </button>
+          <button
+            className="nav-item"
             onClick={() => setDialog({ type: 'settings' })}
           >
             <Settings2 size={17} />
@@ -626,6 +665,33 @@ export function App() {
             >
               {state.settings.paused ? <Play size={14} /> : <Pause size={14} />}
               <span>{state.settings.paused ? 'Resume' : 'Pause'}</span>
+            </button>
+            <button
+              className="icon-button"
+              style={{ position: 'relative' }}
+              aria-label="Notifications"
+              title="Notifications"
+              onClick={() => setNotificationCenterOpen(true)}
+            >
+              <Bell size={18} />
+              {unreadNotifications > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '-2px',
+                    right: '-2px',
+                    backgroundColor: '#ef4444',
+                    color: '#ffffff',
+                    borderRadius: '9999px',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    padding: '1px 5px',
+                    lineHeight: '1',
+                  }}
+                >
+                  {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                </span>
+              )}
             </button>
             <button
               className="icon-button"
@@ -1089,6 +1155,44 @@ export function App() {
       <SkillModal
         open={skillModalOpen}
         onClose={() => setSkillModalOpen(false)}
+      />
+      <NotificationCenter
+        isOpen={notificationCenterOpen}
+        onClose={() => {
+          setNotificationCenterOpen(false);
+          void refreshUnreadCount();
+        }}
+        onNavigate={(actionUrl) => {
+          if (actionUrl === '/approvals') setView('approvals');
+          else if (actionUrl === '/goals') setView('goals');
+          else if (actionUrl === '/tasks') setView('tasks');
+          else if (actionUrl === '/activity') setView('activity');
+          else if (actionUrl === '/connectors') setView('connectors');
+          else if (actionUrl === '/memories') setView('memories');
+        }}
+      />
+      <SetupAssistantModal
+        isOpen={setupAssistantOpen}
+        onClose={() => {
+          setSetupAssistantOpen(false);
+          void refresh();
+        }}
+        dots={workspace?.dots || []}
+        onWorkflowInstalled={() => {
+          void refresh();
+          setView('tasks');
+        }}
+      />
+      <McpDirectoryModal
+        isOpen={mcpDirectoryOpen}
+        onClose={() => {
+          setMcpDirectoryOpen(false);
+          void refresh();
+        }}
+        dots={workspace?.dots || []}
+        onInstalled={() => {
+          void refresh();
+        }}
       />
     </div>
   );

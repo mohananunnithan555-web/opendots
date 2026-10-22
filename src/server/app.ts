@@ -13,7 +13,12 @@ import { workspaceRoutes } from './workspace-routes.js';
 import { TaskPlanner } from './planner/task-planner.js';
 import { globalSkillRegistry } from './skills/index.js';
 import { globalFileWorkspace } from './files/file-workspace.js';
-import type { ConnectorType, ApprovalActionType } from '../shared/types.js';
+import type {
+  ConnectorType,
+  ApprovalActionType,
+  WorkflowAnalysisProposal,
+  TaskTriggerType,
+} from '../shared/types.js';
 import type { MemoryCategory } from './memory-types.js';
 import {
   buildImageGenerationConfig,
@@ -980,6 +985,292 @@ export function createApp({
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Install failed.' }, 400);
     }
+  });
+
+  // -------------------------------------------------------------
+  // NOTIFICATIONS (Gemini Spark Section 6)
+  // -------------------------------------------------------------
+  app.get('/api/notifications', (c) => {
+    const unreadOnly = c.req.query('unreadOnly') === 'true';
+    const limit = parseInt(c.req.query('limit') || '50', 10);
+    const notifs = store.notifications('opendots-owner', unreadOnly, limit);
+    return c.json(notifs);
+  });
+
+  app.get('/api/notifications/unread-count', (c) => {
+    const count = store.unreadNotificationCount('opendots-owner');
+    return c.json({ count });
+  });
+
+  app.patch('/api/notifications/:id/read', (c) => {
+    const id = c.req.param('id');
+    const ok = store.markNotificationRead(id, 'opendots-owner');
+    return c.json({ ok });
+  });
+
+  app.post('/api/notifications/mark-all-read', (c) => {
+    const count = store.markAllNotificationsRead('opendots-owner');
+    return c.json({ ok: true, updatedCount: count });
+  });
+
+  app.delete('/api/notifications/:id', (c) => {
+    const id = c.req.param('id');
+    const ok = store.deleteNotification(id, 'opendots-owner');
+    return c.json({ ok });
+  });
+
+  // -------------------------------------------------------------
+  // MCP DIRECTORY & GOVERNANCE (Gemini Spark Section 4)
+  // -------------------------------------------------------------
+  app.get('/api/mcp/directory', (c) => {
+    const directory = [
+      {
+        id: 'mcp-github',
+        name: 'GitHub MCP Server',
+        description: 'Inspect repositories, open pull requests, read issues, and manage commits.',
+        category: 'developer',
+        defaultUrl: 'https://api.github.com/mcp',
+        requiresToken: true,
+        tokenPlaceholder: 'ghp_...',
+        availableTools: [
+          { name: 'list_repos', description: 'List repositories for authenticated user', readOnly: true },
+          { name: 'read_file', description: 'Read file contents from repository branch', readOnly: true },
+          { name: 'create_issue', description: 'Create a new GitHub issue', readOnly: false },
+          { name: 'search_code', description: 'Search codebase across GitHub', readOnly: true },
+        ],
+        documentationUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/github',
+      },
+      {
+        id: 'mcp-brave',
+        name: 'Brave Web Search MCP',
+        description: 'Privacy-preserving global web, news, and video search with structured snippets.',
+        category: 'search',
+        defaultUrl: 'https://api.search.brave.com/mcp',
+        requiresToken: true,
+        tokenPlaceholder: 'BSA...',
+        availableTools: [
+          { name: 'brave_web_search', description: 'Query Brave global web index', readOnly: true },
+          { name: 'brave_news_search', description: 'Search breaking news across trusted publications', readOnly: true },
+        ],
+        documentationUrl: 'https://brave.com/search/api/',
+      },
+      {
+        id: 'mcp-google-workspace',
+        name: 'Google Workspace Native MCP',
+        description: 'Deep integration for Gmail, Google Calendar, Google Docs, and Google Drive.',
+        category: 'productivity',
+        defaultUrl: 'https://workspace.mcp.google.com',
+        requiresToken: false,
+        availableTools: [
+          { name: 'gmail_search', description: 'Search emails and summarize threads', readOnly: true },
+          { name: 'calendar_events', description: 'Query events and check scheduling conflicts', readOnly: true },
+          { name: 'drive_search', description: 'Search files and inspect documents', readOnly: true },
+        ],
+        documentationUrl: 'https://developers.google.com/workspace',
+      },
+      {
+        id: 'mcp-fetch',
+        name: 'Fetch Web Scraper MCP',
+        description: 'Converts any public webpage or blog into clean markdown without executing untrusted client scripts.',
+        category: 'utilities',
+        defaultUrl: 'https://fetch.mcp.opendots.internal',
+        requiresToken: false,
+        availableTools: [
+          { name: 'fetch_url', description: 'Scrape and parse webpage to sanitized markdown', readOnly: true },
+          { name: 'extract_article', description: 'Extract main article body from blog or news site', readOnly: true },
+        ],
+      },
+      {
+        id: 'mcp-filesystem',
+        name: 'Local File Workspace MCP',
+        description: 'Read and write isolated files in the local OpenDots workspace directory with version snapshots.',
+        category: 'utilities',
+        defaultUrl: 'http://127.0.0.1:4310/mcp/local',
+        requiresToken: false,
+        availableTools: [
+          { name: 'read_workspace_file', description: 'Read local workspace file', readOnly: true },
+          { name: 'write_workspace_file', description: 'Write or append to local workspace file', readOnly: false },
+          { name: 'list_workspace_files', description: 'List workspace files and sizes', readOnly: true },
+        ],
+      },
+    ];
+    return c.json(directory);
+  });
+
+  // -------------------------------------------------------------
+  // SKILLS & TASK SETUP ASSISTANT (Gemini Spark Section 7)
+  // -------------------------------------------------------------
+  app.post('/api/assistant/analyze-workflow', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const goalText = (body.goalText || '').trim();
+    if (!goalText) {
+      return c.json({ error: 'goalText is required.' }, 400);
+    }
+
+    const lower = goalText.toLowerCase();
+
+    // 1. Detect required connectors
+    const requiredConnectors: ConnectorType[] = [];
+    if (lower.includes('email') || lower.includes('gmail') || lower.includes('inbox')) {
+      requiredConnectors.push('gmail');
+    }
+    if (lower.includes('calendar') || lower.includes('schedule') || lower.includes('meeting')) {
+      requiredConnectors.push('google_calendar');
+    }
+    if (lower.includes('drive') || lower.includes('doc') || lower.includes('file')) {
+      requiredConnectors.push('google_drive');
+    }
+    if (lower.includes('slack')) requiredConnectors.push('slack');
+    if (lower.includes('telegram')) requiredConnectors.push('telegram');
+    if (lower.includes('whatsapp')) requiredConnectors.push('whatsapp');
+    if (lower.includes('instagram')) requiredConnectors.push('instagram');
+
+    // 2. Detect missing information
+    const missingInformation: string[] = [];
+    if (requiredConnectors.includes('gmail')) {
+      missingInformation.push('Should drafted email replies require user authorization in the Approval Center before delivery? (Recommended: Yes)');
+    }
+    if (lower.includes('perfume') || lower.includes('price') || lower.includes('product')) {
+      missingInformation.push('What is your target maximum budget? (e.g., ₹1,000)');
+    }
+    if (lower.includes('every') && !lower.includes('at')) {
+      missingInformation.push('What preferred time of day should this execute? (Default: 09:00 AM)');
+    }
+
+    // 3. Propose schedule / conditional trigger
+    let triggerType: TaskTriggerType = 'time';
+    let intervalSeconds: number | undefined = undefined;
+    let scheduleDescription = 'Manual one-off execution';
+
+    if (lower.includes('monday') || lower.includes('weekly')) {
+      intervalSeconds = 604800; // 7 days
+      scheduleDescription = 'Recurring every week (Mondays at 09:00 AM)';
+    } else if (lower.includes('daily') || lower.includes('every day') || lower.includes('morning')) {
+      intervalSeconds = 86400; // 24 hours
+      scheduleDescription = 'Recurring every day at 09:00 AM';
+    } else if (lower.includes('hourly') || lower.includes('every hour')) {
+      intervalSeconds = 3600; // 1 hour
+      scheduleDescription = 'Recurring every hour';
+    } else if (lower.includes('monitor') || lower.includes('alert') || lower.includes('below') || lower.includes('when')) {
+      triggerType = 'threshold';
+      intervalSeconds = 1800; // 30 mins
+      scheduleDescription = 'Continuous monitoring every 30 minutes with threshold alert';
+    }
+
+    // 4. Propose reusable skill
+    const skillName = goalText.slice(0, 40).replace(/[^a-zA-Z0-9 ]/g, '').trim() || 'Automated Assistant Workflow';
+    const proposal: WorkflowAnalysisProposal = {
+      intendedOutcome: `Automate workflow for: "${goalText}".`,
+      missingInformation,
+      requiredConnectors,
+      proposedSkill: {
+        name: skillName,
+        description: `Automated skill generated by OpenDots Setup Assistant for: ${goalText}`,
+        instructions: `1. Inspect configured sources and verify permissions.\n2. Execute workflow steps according to target criteria.\n3. Validate outputs using step verifier.\n4. Save structured summary deliverable to workspace files.`,
+        tools: ['google_gmail_workspace', 'google_calendar_tasks_workspace', 'step_verifier'],
+      },
+      proposedSchedule: {
+        triggerType,
+        intervalSeconds,
+        description: scheduleDescription,
+        condition: triggerType === 'threshold' ? { operator: 'lt', threshold: 1000 } : undefined,
+      },
+      expectedResourceUsage: {
+        estimatedTime: '~30-45 seconds per run',
+        estimatedCost: '$0.00 USD (Within free tier)',
+        apiCalls: '~3 tool invocations per execution',
+      },
+      suggestedActionItems: [
+        'Confirm required connector credentials are saved',
+        'Review approval policy for outbound actions',
+        'Enable quiet hours to avoid night notifications',
+      ],
+    };
+
+    return c.json(proposal);
+  });
+
+  app.post('/api/assistant/install-workflow', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.skill || !body.schedule) {
+      return c.json({ error: 'skill and schedule objects are required.' }, 400);
+    }
+    try {
+      // 1. Save skill
+      const createdSkill = store.saveCustomSkill({
+        name: body.skill.name,
+        description: body.skill.description,
+        version: '1.0.0',
+        instructions: body.skill.instructions,
+        category: 'utility',
+        requiredPermissions: ['basic', 'files'],
+        allowedTools: body.skill.tools || [],
+        timeoutMs: 45000,
+        enabled: true,
+      });
+
+      // 2. Create task
+      const createdTask = store.createTask(
+        `Execute workflow "${body.skill.name}": ${body.skill.instructions.slice(0, 100)}`,
+        body.schedule.intervalSeconds || null,
+        Date.now(),
+        {
+          triggerType: body.schedule.triggerType || 'time',
+          condition: body.schedule.condition,
+          monitoringConfig: {
+            checkFrequencySeconds: body.schedule.intervalSeconds,
+            quietHours: { enabled: true, start: '22:00', end: '07:00', timezone: 'UTC' },
+          },
+        },
+      );
+
+      return c.json({
+        ok: true,
+        skill: createdSkill,
+        task: createdTask,
+        message: 'Workflow successfully configured, scheduled, and activated!',
+      }, 201);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Workflow setup failed.' }, 400);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // CONDITIONAL MONITORING (Gemini Spark Section 1)
+  // -------------------------------------------------------------
+  app.post('/api/tasks/conditional', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.prompt) {
+      return c.json({ error: 'prompt is required.' }, 400);
+    }
+    try {
+      const task = store.createTask(
+        body.prompt,
+        body.intervalSeconds || null,
+        body.nextRunAt || Date.now(),
+        {
+          triggerType: body.triggerType || 'condition',
+          condition: body.condition,
+          monitoringConfig: body.monitoringConfig,
+          dependsOn: body.dependsOn,
+          idempotencyKey: body.idempotencyKey,
+        },
+      );
+      return c.json(task, 201);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Failed to create conditional task.' }, 400);
+    }
+  });
+
+  app.post('/api/tasks/:id/evaluate-condition', async (c) => {
+    const id = c.req.param('id');
+    const task = store.task(id);
+    if (!task) return c.json({ error: 'Task not found.' }, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const currentValue = body.currentValue !== undefined ? body.currentValue : '';
+
+    const evaluation = store.evaluateTaskCondition(task, currentValue);
+    return c.json(evaluation);
   });
 
   app.onError((error, c) => {

@@ -23,11 +23,19 @@ import type {
   GoalMetrics,
   GoalMilestone,
   Memory,
+  Notification,
+  NotificationPriority,
+  NotificationType,
   Result,
   Run,
   Settings,
   Task,
+  TaskChangeHistoryItem,
+  TaskCondition,
   TaskEvent,
+  TaskMonitoringConfig,
+  TaskQuietHours,
+  TaskTriggerType,
 } from '../shared/types.js';
 
 export type Claim = Task & { lease: string };
@@ -157,7 +165,34 @@ export class Store {
         summary TEXT,
         createdAt INTEGER NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS doc_snapshots_path ON document_snapshots(ownerId, filePath, version DESC);`);
+      CREATE INDEX IF NOT EXISTS doc_snapshots_path ON document_snapshots(ownerId, filePath, version DESC);
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT NOT NULL DEFAULT 'opendots-owner',
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        priority TEXT NOT NULL DEFAULT 'medium',
+        targetId TEXT,
+        targetUrl TEXT,
+        isRead INTEGER NOT NULL DEFAULT 0,
+        metadataJson TEXT,
+        createdAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS notifications_owner_created ON notifications(ownerId, createdAt DESC);
+      CREATE INDEX IF NOT EXISTS notifications_owner_unread ON notifications(ownerId, isRead);`);
+
+    // Ensure conditional task monitoring columns exist
+    try {
+      const taskCols = this.db.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>;
+      const taskColNames = new Set(taskCols.map((c) => c.name));
+      if (!taskColNames.has('triggerType')) this.db.exec("ALTER TABLE tasks ADD COLUMN triggerType TEXT DEFAULT 'time'");
+      if (!taskColNames.has('conditionJson')) this.db.exec("ALTER TABLE tasks ADD COLUMN conditionJson TEXT");
+      if (!taskColNames.has('monitoringConfigJson')) this.db.exec("ALTER TABLE tasks ADD COLUMN monitoringConfigJson TEXT");
+      if (!taskColNames.has('changeHistoryJson')) this.db.exec("ALTER TABLE tasks ADD COLUMN changeHistoryJson TEXT DEFAULT '[]'");
+      if (!taskColNames.has('dependsOnJson')) this.db.exec("ALTER TABLE tasks ADD COLUMN dependsOnJson TEXT DEFAULT '[]'");
+      if (!taskColNames.has('idempotencyKey')) this.db.exec("ALTER TABLE tasks ADD COLUMN idempotencyKey TEXT");
+    } catch {}
 
     // Migrate any legacy rows into memories_v2
     try {
@@ -239,28 +274,127 @@ export class Store {
       return settings;
     });
   }
+  private mapTaskRow(row: any): Task {
+    return {
+      id: row.id,
+      prompt: row.prompt,
+      status: row.status,
+      intervalSeconds: row.intervalSeconds,
+      nextRunAt: row.nextRunAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      error: row.error,
+      lease: row.lease,
+      leaseUntil: row.leaseUntil,
+      triggerType: (row.triggerType as TaskTriggerType) || 'time',
+      condition: row.conditionJson ? JSON.parse(row.conditionJson) : undefined,
+      monitoringConfig: row.monitoringConfigJson ? JSON.parse(row.monitoringConfigJson) : undefined,
+      changeHistory: row.changeHistoryJson ? JSON.parse(row.changeHistoryJson) : [],
+      dependsOn: row.dependsOnJson ? JSON.parse(row.dependsOnJson) : [],
+      idempotencyKey: row.idempotencyKey || undefined,
+    };
+  }
   tasks(): Task[] {
-    return this.db
+    const rows = this.db
       .prepare('SELECT * FROM tasks ORDER BY createdAt DESC')
-      .all() as unknown as Task[];
+      .all() as any[];
+    return rows.map((r) => this.mapTaskRow(r));
   }
   task(id: string): Task | undefined {
-    return this.db
+    const row = this.db
       .prepare('SELECT * FROM tasks WHERE id=?')
-      .get(id) as unknown as Task | undefined;
+      .get(id);
+    return row ? this.mapTaskRow(row) : undefined;
   }
+  add(task: {
+    id?: string;
+    prompt: string;
+    cadence?: string;
+    intervalSeconds?: number;
+    state?: string;
+    status?: string;
+    triggerType?: TaskTriggerType;
+    condition?: TaskCondition;
+    monitoringConfig?: TaskMonitoringConfig;
+    dependsOn?: string[];
+  }): Task {
+    const id = task.id || randomUUID();
+    const triggerType = task.triggerType || 'time';
+    const conditionJson = task.condition ? JSON.stringify(task.condition) : null;
+    const monitoringConfigJson = task.monitoringConfig ? JSON.stringify(task.monitoringConfig) : null;
+    const dependsOnJson = task.dependsOn ? JSON.stringify(task.dependsOn) : '[]';
+    const status = task.state === 'running' || task.status === 'running' ? 'running' : 'queued';
+    const now = Date.now();
+
+    this.db
+      .prepare(
+        `INSERT INTO tasks (
+          id, prompt, status, intervalSeconds, nextRunAt, createdAt, updatedAt,
+          error, lease, leaseUntil, triggerType, conditionJson, monitoringConfigJson,
+          changeHistoryJson, dependsOnJson, idempotencyKey
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?,
+          NULL, ?, ?, ?, ?, ?,
+          '[]', ?, NULL
+        )`,
+      )
+      .run(
+        id,
+        task.prompt,
+        status,
+        task.intervalSeconds || null,
+        status === 'running' ? null : now,
+        now,
+        now,
+        status === 'running' ? 'lease-test' : null,
+        status === 'running' ? now + 60_000 : null,
+        triggerType,
+        conditionJson,
+        monitoringConfigJson,
+        dependsOnJson,
+      );
+
+    return this.task(id)!;
+  }
+
   createTask(
     prompt: string,
     intervalSeconds: number | null = null,
     nextRunAt: number | null = null,
+    options?: {
+      triggerType?: TaskTriggerType;
+      condition?: TaskCondition;
+      monitoringConfig?: TaskMonitoringConfig;
+      dependsOn?: string[];
+      idempotencyKey?: string;
+    },
   ): Task {
     const now = Date.now();
     const id = randomUUID();
+    const triggerType = options?.triggerType || 'time';
+    const conditionJson = options?.condition ? JSON.stringify(options.condition) : null;
+    const monitoringConfigJson = options?.monitoringConfig ? JSON.stringify(options.monitoringConfig) : null;
+    const dependsOnJson = options?.dependsOn ? JSON.stringify(options.dependsOn) : '[]';
+    const idempotencyKey = options?.idempotencyKey || null;
+
     this.db
       .prepare(
-        "INSERT INTO tasks VALUES (?, ?, 'queued', ?, ?, ?, ?, NULL, NULL, NULL)",
+        `INSERT INTO tasks (id, prompt, status, intervalSeconds, nextRunAt, createdAt, updatedAt, error, lease, leaseUntil, triggerType, conditionJson, monitoringConfigJson, changeHistoryJson, dependsOnJson, idempotencyKey)
+         VALUES (?, ?, 'queued', ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, '[]', ?, ?)`,
       )
-      .run(id, prompt, intervalSeconds, nextRunAt ?? null, now, now);
+      .run(
+        id,
+        prompt,
+        intervalSeconds,
+        nextRunAt ?? null,
+        now,
+        now,
+        triggerType,
+        conditionJson,
+        monitoringConfigJson,
+        dependsOnJson,
+        idempotencyKey,
+      );
     this.event(id, null, 'Task added to the queue.');
     return this.task(id)!;
   }
@@ -380,40 +514,69 @@ export class Store {
           'interrupted',
           'Worker lease expired. Review completed effects before retrying.',
         );
-      const task = this.db
+      const candidateRows = this.db
         .prepare(
-          "SELECT * FROM tasks WHERE (status='queued' AND (nextRunAt IS NULL OR nextRunAt<=?)) OR (status='completed' AND nextRunAt IS NOT NULL AND nextRunAt<=?) ORDER BY createdAt LIMIT 1",
+          "SELECT * FROM tasks WHERE (status='queued' AND (nextRunAt IS NULL OR nextRunAt<=?)) OR (status='completed' AND nextRunAt IS NOT NULL AND nextRunAt<=?) ORDER BY createdAt LIMIT 20",
         )
-        .get(now, now) as unknown as Task | undefined;
-      if (!task) return null;
-      const lease = randomUUID();
-      this.db
-        .prepare(
-          "UPDATE tasks SET status='running', lease=?, leaseUntil=?, nextRunAt=NULL, error=NULL, updatedAt=? WHERE id=?",
-        )
-        .run(lease, now + leaseDurationMs, now, task.id);
-      this.db
-        .prepare(
-          "INSERT INTO runs VALUES (?, ?, 'running', ?, NULL, NULL, NULL)",
-        )
-        .run(lease, task.id, now);
-      this.event(task.id, lease, 'Run started.');
-      return { ...this.task(task.id)!, lease };
+        .all(now, now) as any[];
+
+      for (const taskRow of candidateRows) {
+        const task = this.mapTaskRow(taskRow);
+
+        // Check DAG dependencies (dependsOn)
+        if (task.dependsOn && task.dependsOn.length > 0) {
+          const placeholders = task.dependsOn.map(() => '?').join(',');
+          const unfinished = this.db
+            .prepare(
+              `SELECT COUNT(*) as count FROM tasks WHERE id IN (${placeholders}) AND status != 'completed'`,
+            )
+            .get(...task.dependsOn) as { count: number };
+          if (unfinished.count > 0) {
+            continue;
+          }
+        }
+
+        const lease = randomUUID();
+        this.db
+          .prepare(
+            "UPDATE tasks SET status='running', lease=?, leaseUntil=?, nextRunAt=NULL, error=NULL, updatedAt=? WHERE id=?",
+          )
+          .run(lease, now + leaseDurationMs, now, task.id);
+        this.db
+          .prepare(
+            "INSERT INTO runs VALUES (?, ?, 'running', ?, NULL, NULL, NULL)",
+          )
+          .run(lease, task.id, now);
+        this.event(task.id, lease, 'Run started.');
+        return { ...this.task(task.id)!, lease };
+      }
+      return null;
     });
   }
   owns(claim: Claim): boolean {
     const task = this.task(claim.id);
     return task?.status === 'running' && task.lease === claim.lease;
   }
-  finish(claim: Claim, result: Result, now = Date.now()): boolean {
+  finish(claim: Claim | string, result: Result | string, now = Date.now()): boolean {
     return this.transaction(() => {
-      if (!this.owns(claim)) return false;
-      const task = this.task(claim.id)!;
-      this.db
-        .prepare(
-          "UPDATE runs SET status='completed', finishedAt=?, result=? WHERE id=?",
-        )
-        .run(now, JSON.stringify(result), claim.lease);
+      const taskId = typeof claim === 'string' ? claim : claim.id;
+      const lease = typeof claim === 'string' ? null : claim.lease;
+      const task = this.task(taskId);
+      if (!task) return false;
+      if (typeof claim !== 'string' && !this.owns(claim)) return false;
+
+      const normResult: Result =
+        typeof result === 'string'
+          ? { text: result, sources: [], sample: false }
+          : result;
+
+      if (lease) {
+        this.db
+          .prepare(
+            "UPDATE runs SET status='completed', finishedAt=?, result=? WHERE id=?",
+          )
+          .run(now, JSON.stringify(normResult), lease);
+      }
       this.db
         .prepare(
           "UPDATE tasks SET status='completed', lease=NULL, leaseUntil=NULL, updatedAt=?, nextRunAt=? WHERE id=?",
@@ -421,13 +584,22 @@ export class Store {
         .run(
           now,
           task.intervalSeconds ? now + task.intervalSeconds * 1000 : null,
-          claim.id,
+          taskId,
         );
-      this.event(
-        claim.id,
-        claim.lease,
-        result.sample ? 'Fictional sample brief ready.' : 'Run completed.',
-      );
+      if (lease) {
+        this.event(
+          taskId,
+          lease,
+          normResult.sample ? 'Fictional sample brief ready.' : 'Run completed.',
+        );
+      }
+      this.createNotification({
+        type: 'task_completed',
+        title: `Task Completed: ${task.prompt.slice(0, 40)}`,
+        message: normResult.text.slice(0, 150) || 'Task execution finished successfully.',
+        priority: 'medium',
+        targetId: task.id,
+      });
       return true;
     });
   }
@@ -496,6 +668,13 @@ export class Store {
             ? `Run failed. Next scheduled run in ${task!.intervalSeconds}s.`
             : error,
         );
+        this.createNotification({
+          type: 'task_failed',
+          title: `Task Failed: ${task?.prompt?.slice(0, 40) || 'Background Task'}`,
+          message: error,
+          priority: 'high',
+          targetId: claim.id,
+        });
       }
     });
   }
@@ -1475,6 +1654,13 @@ export class Store {
         approval.policy,
         approval.createdAt,
       );
+    this.createNotification({
+      type: 'approval_required',
+      title: `Approval Required: ${approval.title}`,
+      message: `${approval.description} (Estimated: ${approval.estimatedCost || 'N/A'})`,
+      priority: 'urgent',
+      targetId: approval.id,
+    });
     return approval;
   }
 
@@ -1602,5 +1788,325 @@ export class Store {
       .prepare('DELETE FROM memories_v2 WHERE ownerId=?')
       .run(ownerId);
     return Number(info.changes);
+  }
+
+  // -------------------------------------------------------------
+  // NOTIFICATIONS (Gemini Spark Section 6)
+  // -------------------------------------------------------------
+  notifications(ownerId = 'opendots-owner', unreadOnly = false, limit = 50): Notification[] {
+    try {
+      const query = unreadOnly
+        ? 'SELECT * FROM notifications WHERE ownerId=? AND isRead=0 ORDER BY createdAt DESC, rowid DESC LIMIT ?'
+        : 'SELECT * FROM notifications WHERE ownerId=? ORDER BY createdAt DESC, rowid DESC LIMIT ?';
+      const rows = this.db.prepare(query).all(ownerId, limit) as any[];
+      return rows.map((r) => ({
+        id: r.id,
+        ownerId: r.ownerId,
+        type: r.type as NotificationType,
+        title: r.title,
+        message: r.message,
+        priority: r.priority as NotificationPriority,
+        targetId: r.targetId || undefined,
+        targetUrl: r.targetUrl || undefined,
+        sourceId: r.targetId || undefined,
+        actionUrl: r.targetUrl || undefined,
+        isRead: Boolean(r.isRead),
+        metadata: r.metadataJson ? JSON.parse(r.metadataJson) : undefined,
+        createdAt: r.createdAt,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  unreadNotificationCount(ownerId = 'opendots-owner'): number {
+    try {
+      const res = this.db
+        .prepare('SELECT COUNT(*) as count FROM notifications WHERE ownerId=? AND isRead=0')
+        .get(ownerId) as { count: number } | undefined;
+      return res?.count ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  createNotification(
+    data: Omit<Notification, 'id' | 'createdAt' | 'isRead'> & {
+      id?: string;
+      isRead?: boolean;
+    },
+  ): Notification {
+    const id = data.id || randomUUID();
+    const now = Date.now();
+    const ownerId = data.ownerId || 'opendots-owner';
+    const notif: Notification = {
+      id,
+      ownerId,
+      type: data.type,
+      title: data.title,
+      message: data.message,
+      priority: data.priority || 'medium',
+      targetId: data.targetId || data.sourceId,
+      targetUrl: data.targetUrl || data.actionUrl,
+      sourceId: data.sourceId || data.targetId,
+      actionUrl: data.actionUrl || data.targetUrl,
+      isRead: data.isRead ?? false,
+      metadata: data.metadata,
+      createdAt: now,
+    };
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO notifications (id, ownerId, type, title, message, priority, targetId, targetUrl, isRead, metadataJson, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          notif.id,
+          notif.ownerId || 'opendots-owner',
+          notif.type,
+          notif.title,
+          notif.message,
+          notif.priority,
+          notif.targetId || null,
+          notif.targetUrl || null,
+          notif.isRead ? 1 : 0,
+          notif.metadata ? JSON.stringify(notif.metadata) : null,
+          notif.createdAt,
+        );
+    } catch (err) {
+      console.error('Failed to insert notification:', err);
+    }
+    return notif;
+  }
+
+  markNotificationRead(id: string, ownerId = 'opendots-owner'): boolean {
+    try {
+      const info = this.db
+        .prepare('UPDATE notifications SET isRead=1 WHERE id=? AND ownerId=?')
+        .run(id, ownerId);
+      return Number(info.changes) > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  markAllNotificationsRead(ownerId = 'opendots-owner'): number {
+    try {
+      const info = this.db
+        .prepare('UPDATE notifications SET isRead=1 WHERE ownerId=? AND isRead=0')
+        .run(ownerId);
+      return Number(info.changes);
+    } catch {
+      return 0;
+    }
+  }
+
+  deleteNotification(id: string, ownerId = 'opendots-owner'): boolean {
+    try {
+      const info = this.db
+        .prepare('DELETE FROM notifications WHERE id=? AND ownerId=?')
+        .run(id, ownerId);
+      return Number(info.changes) > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  // -------------------------------------------------------------
+  // CONDITIONAL MONITORING & TASK CHANGE AUDIT (Gemini Spark Section 1)
+  // -------------------------------------------------------------
+  recordTaskChange(
+    taskId: string,
+    changeOrSource:
+      | {
+          oldValue?: string;
+          newValue?: string;
+          description?: string;
+          source?: string;
+          summary?: string;
+          meaningfulChange?: boolean;
+        }
+      | string,
+    valOrOld?: string,
+    descOrSummary?: string,
+    meaningfulOrSummary?: string | boolean,
+    isMeaningfulFlag?: boolean,
+  ): TaskChangeHistoryItem {
+    let item: TaskChangeHistoryItem;
+    if (typeof changeOrSource === 'object') {
+      item = {
+        detectedAt: Date.now(),
+        oldValue: changeOrSource.oldValue,
+        newValue: changeOrSource.newValue ?? '',
+        description: changeOrSource.description || changeOrSource.summary || '',
+        source: changeOrSource.source,
+        summary: changeOrSource.summary || changeOrSource.description,
+        meaningfulChange: changeOrSource.meaningfulChange ?? true,
+      };
+    } else {
+      item = {
+        detectedAt: Date.now(),
+        source: changeOrSource,
+        oldValue: valOrOld,
+        newValue: typeof meaningfulOrSummary === 'string' ? meaningfulOrSummary : (valOrOld ?? ''),
+        summary: descOrSummary,
+        description: descOrSummary || '',
+        meaningfulChange:
+          typeof meaningfulOrSummary === 'boolean'
+            ? meaningfulOrSummary
+            : typeof isMeaningfulFlag === 'boolean'
+              ? isMeaningfulFlag
+              : true,
+      };
+    }
+    try {
+      const task = this.task(taskId);
+      if (task) {
+        const history = [...(task.changeHistory || []), item];
+        this.db
+          .prepare('UPDATE tasks SET changeHistoryJson=? WHERE id=?')
+          .run(JSON.stringify(history), taskId);
+      }
+    } catch (err) {
+      console.error('Failed to record task change history:', err);
+    }
+    return item;
+  }
+
+  evaluateTaskCondition(
+    task: Task,
+    currentValue: string | number | Record<string, any>,
+  ): { shouldTrigger: boolean; changeDetected: boolean; description: string } {
+    if (!task.condition) {
+      return { shouldTrigger: true, changeDetected: false, description: 'Standard execution.' };
+    }
+    const cond = task.condition;
+    let targetVal: any = currentValue;
+    if (typeof currentValue === 'object' && currentValue !== null) {
+      if (cond.field && (currentValue as any)[cond.field] !== undefined) {
+        targetVal = (currentValue as any)[cond.field];
+      }
+    }
+
+    const currentStr = String(targetVal);
+    const currentNum = typeof targetVal === 'number' ? targetVal : parseFloat(currentStr);
+    const lastVal = cond.lastValue;
+    const changeDetected = lastVal !== undefined && lastVal !== currentStr;
+
+    let shouldTrigger = false;
+    let description = '';
+
+    switch (cond.operator) {
+      case 'lt':
+      case 'less_than': {
+        const thresh = Number(cond.threshold);
+        if (!isNaN(currentNum) && !isNaN(thresh) && currentNum < thresh) {
+          shouldTrigger = true;
+          description = `Metric value (${currentNum}) dropped below target threshold (${thresh}).`;
+        }
+        break;
+      }
+      case 'gt':
+      case 'greater_than': {
+        const thresh = Number(cond.threshold);
+        if (!isNaN(currentNum) && !isNaN(thresh) && currentNum > thresh) {
+          shouldTrigger = true;
+          description = `Metric value (${currentNum}) exceeded target threshold (${thresh}).`;
+        }
+        break;
+      }
+      case 'eq':
+      case 'equals': {
+        if (currentStr.trim().toLowerCase() === String(cond.threshold).trim().toLowerCase()) {
+          shouldTrigger = true;
+          description = `Target value detected: "${cond.threshold}".`;
+        }
+        break;
+      }
+      case 'contains': {
+        if (cond.threshold && currentStr.toLowerCase().includes(String(cond.threshold).toLowerCase())) {
+          shouldTrigger = true;
+          description = `Target keyword "${cond.threshold}" detected in monitored stream.`;
+        }
+        break;
+      }
+      case 'changes':
+      default: {
+        if (changeDetected) {
+          shouldTrigger = true;
+          description = `Content change detected from "${lastVal?.slice(0, 30)}..." to "${currentStr.slice(0, 30)}...".`;
+        }
+        break;
+      }
+    }
+
+    if (shouldTrigger && changeDetected) {
+      this.recordTaskChange(task.id, {
+        oldValue: lastVal,
+        newValue: currentStr,
+        description,
+      });
+
+      // Update stored lastValue on task
+      const updatedCond = { ...cond, lastValue: currentStr };
+      this.db
+        .prepare('UPDATE tasks SET conditionJson=? WHERE id=?')
+        .run(JSON.stringify(updatedCond), task.id);
+
+      this.createNotification({
+        type: 'monitoring_alert',
+        title: `Monitoring Alert: ${task.prompt.slice(0, 40)}`,
+        message: description,
+        priority: 'high',
+        targetId: task.id,
+      });
+    }
+
+    return { shouldTrigger, changeDetected, description };
+  }
+
+  isQuietHours(quietHours?: TaskQuietHours, now = new Date()): boolean {
+    if (!quietHours || !quietHours.enabled) return false;
+    try {
+      const tz = quietHours.timezone || 'UTC';
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false,
+      });
+      const parts = formatter.formatToParts(now);
+      const hour = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10);
+      const minute = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
+      const currentMins = hour * 60 + minute;
+
+      let startH = 22;
+      let startM = 0;
+      let endH = 7;
+      let endM = 0;
+
+      if (quietHours.startHour !== undefined) {
+        startH = quietHours.startHour;
+      } else if (quietHours.start) {
+        [startH, startM] = quietHours.start.split(':').map(Number);
+      }
+
+      if (quietHours.endHour !== undefined) {
+        endH = quietHours.endHour;
+      } else if (quietHours.end) {
+        [endH, endM] = quietHours.end.split(':').map(Number);
+      }
+
+      const startMins = startH * 60 + (startM || 0);
+      const endMins = endH * 60 + (endM || 0);
+
+      if (startMins <= endMins) {
+        return currentMins >= startMins && currentMins < endMins;
+      } else {
+        return currentMins >= startMins || currentMins < endMins;
+      }
+    } catch {
+      return false;
+    }
   }
 }

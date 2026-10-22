@@ -5,6 +5,7 @@ import { DirectScrapeProvider } from './providers/direct-scrape-provider.js';
 import { synthesizeResearchReport } from './citation-engine.js';
 import { webReaderTool } from '../tools/builtin/web-reader.js';
 import { executeSafeTool } from '../tools/open-dots-tool.js';
+import { globalFileWorkspace } from '../files/file-workspace.js';
 
 export class DeepResearchEngine {
   private providers: SearchProvider[] = [];
@@ -39,7 +40,23 @@ export class DeepResearchEngine {
     }
 
     try {
-      const searchResults = await provider.search(cleanQuery, limit, options.signal);
+      let searchResults = await provider.search(cleanQuery, limit, options.signal);
+
+      // Automatic follow-up search if initial evidence is scarce
+      if (searchResults.length < 2) {
+        try {
+          const followUpResults = await provider.search(`${cleanQuery} detailed overview`, limit, options.signal);
+          const combined = [...searchResults, ...followUpResults];
+          // deduplicate by URL
+          const seen = new Set<string>();
+          searchResults = combined.filter((item) => {
+            if (!item.url || seen.has(item.url)) return false;
+            seen.add(item.url);
+            return true;
+          });
+        } catch {}
+      }
+
       if (searchResults.length === 0) {
         return synthesizeResearchReport(cleanQuery, []);
       }
@@ -74,7 +91,22 @@ export class DeepResearchEngine {
       });
 
       const resolvedSources = await Promise.all(fetchPromises);
-      return synthesizeResearchReport(cleanQuery, resolvedSources);
+      const report = synthesizeResearchReport(cleanQuery, resolvedSources);
+
+      // Auto-save research deliverable report to workspace
+      try {
+        const fileSlug = cleanQuery.toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 30);
+        const exportRes = globalFileWorkspace.exportDocument(
+          `research_${fileSlug}_${Date.now()}`,
+          report.markdownReport,
+          'markdown',
+        );
+        if (exportRes && exportRes.relativePath) {
+          report.savedDeliverablePath = exportRes.relativePath;
+        }
+      } catch {}
+
+      return report;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return {

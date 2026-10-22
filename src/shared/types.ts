@@ -106,6 +106,111 @@ export interface DocumentSnapshot {
   summary?: string;
   createdAt: number;
 }
+
+export type NotificationType =
+  | 'task_completed'
+  | 'task_failed'
+  | 'approval_required'
+  | 'monitoring_alert'
+  | 'conditional_trigger'
+  | 'deadline_approaching'
+  | 'info_required';
+
+export type NotificationPriority = 'low' | 'medium' | 'high' | 'urgent';
+
+export interface Notification {
+  id: string;
+  ownerId?: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  priority: NotificationPriority;
+  targetId?: string;
+  targetUrl?: string;
+  sourceId?: string;
+  actionUrl?: string;
+  isRead: boolean;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+}
+
+export type TaskTriggerType = 'time' | 'condition' | 'threshold' | 'content_change' | 'conditional';
+
+export interface TaskCondition {
+  targetUrl?: string;
+  topic?: string;
+  field?: string;
+  operator?: 'lt' | 'gt' | 'eq' | 'contains' | 'changes' | 'less_than' | 'greater_than' | 'equals';
+  threshold?: number | string;
+  lastValue?: string;
+  lastHash?: string;
+}
+
+export interface TaskQuietHours {
+  enabled: boolean;
+  start?: string;
+  end?: string;
+  startHour?: number;
+  endHour?: number;
+  timezone?: string;
+}
+
+export interface TaskMonitoringConfig {
+  checkFrequencySeconds?: number;
+  quietHours?: TaskQuietHours;
+  notificationPreferences?: {
+    inApp?: boolean;
+    email?: boolean;
+    slack?: boolean;
+  };
+}
+
+export interface TaskChangeHistoryItem {
+  detectedAt: number;
+  oldValue?: string;
+  newValue?: string;
+  description?: string;
+  source?: string;
+  summary?: string;
+  meaningfulChange?: boolean;
+}
+
+export interface McpDirectoryItem {
+  id: string;
+  name: string;
+  description: string;
+  category: 'search' | 'developer' | 'productivity' | 'utilities' | 'database';
+  defaultUrl: string;
+  requiresToken: boolean;
+  tokenPlaceholder?: string;
+  availableTools: Array<{ name: string; description: string; readOnly: boolean }>;
+  documentationUrl?: string;
+}
+
+export interface WorkflowAnalysisProposal {
+  intendedOutcome: string;
+  missingInformation: string[];
+  requiredConnectors: ConnectorType[];
+  proposedSkill: {
+    name: string;
+    description: string;
+    instructions: string;
+    tools: string[];
+  };
+  proposedSchedule?: {
+    triggerType: TaskTriggerType;
+    intervalSeconds?: number;
+    condition?: TaskCondition;
+    description: string;
+  };
+  expectedResourceUsage: {
+    estimatedTime: string;
+    estimatedCost: string;
+    apiCalls: string;
+  };
+  suggestedActionItems: string[];
+}
+
 export interface Task {
   id: string;
   prompt: string;
@@ -117,6 +222,12 @@ export interface Task {
   error: string | null;
   lease: string | null;
   leaseUntil: number | null;
+  triggerType?: TaskTriggerType;
+  condition?: TaskCondition;
+  monitoringConfig?: TaskMonitoringConfig;
+  changeHistory?: TaskChangeHistoryItem[];
+  dependsOn?: string[];
+  idempotencyKey?: string;
 }
 export interface Source {
   title: string;
