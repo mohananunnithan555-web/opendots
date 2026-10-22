@@ -31,6 +31,8 @@ import {
   unitTestGeneratorTool,
   codeSymbolsTool,
 } from './builtin/code-assistant.js';
+import { codeSandboxTool } from './builtin/code-sandbox.js';
+import { perspectiveMatrixTool } from './builtin/perspective-matrix.js';
 import { deepResearchTool } from '../research/research-tool.js';
 import { delegateToSpecialistTool } from '../specialists/specialist-tools.js';
 import {
@@ -137,3 +139,5 @@ globalToolRegistry.register(publicTrendAnalysisTool);
 globalToolRegistry.register(codeReviewTool);
 globalToolRegistry.register(unitTestGeneratorTool);
 globalToolRegistry.register(codeSymbolsTool);
+globalToolRegistry.register(codeSandboxTool);
+globalToolRegistry.register(perspectiveMatrixTool);

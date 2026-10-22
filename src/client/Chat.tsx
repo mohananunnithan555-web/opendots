@@ -28,6 +28,7 @@ import {
   PhoneOff,
   Square,
   X,
+  Sparkles,
   Image as ImageIcon,
 } from 'lucide-react';
 import { ImageModal } from './ImageModal';
@@ -113,6 +114,7 @@ export function Chat({
     quality?: 'standard' | 'hd' | '4k';
     aspectRatio?: '16:9' | '1:1' | '4:3' | '3:4' | '9:16';
   }>({});
+  const [grokMode, setGrokMode] = useState<'normal' | 'think' | 'fun' | 'deepsearch' | 'de-hype'>('normal');
 
   useEffect(() => {
     const handleOpenStudio = (e: Event) => {
@@ -532,9 +534,63 @@ export function Chat({
         className="chat-composer"
         onSubmit={(e) => {
           e.preventDefault();
-          void send(`${source ? `From ${source}:\n\n` : ''}${draft}`);
+          const modeInstruction =
+            grokMode === 'think'
+              ? '[GROK THINK MODE: Write your step-by-step reasoning scratchpad in <thought>...</thought> tags, then provide the final verified response.]\n'
+              : grokMode === 'fun'
+              ? '[GROK FUN MODE: Respond with wit, sarcasm, and playful Hitchhiker’s Guide-style humor.]\n'
+              : grokMode === 'deepsearch'
+              ? '[GROK DEEPSEARCH MODE: Perform an exhaustive multi-source investigation with citations and confidence metrics.]\n'
+              : grokMode === 'de-hype'
+              ? '[GROK DE-HYPE MODE: Cut through marketing jargon and objectively balance tradeoffs and competing viewpoints.]\n'
+              : '';
+          const fullDraft = `${source ? `From ${source}:\n\n` : ''}${modeInstruction}${draft}`;
+          void send(fullDraft);
         }}
       >
+        {/* Grok Mode Selector Bar */}
+        <div
+          className="grok-mode-bar"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            marginBottom: 8,
+            overflowX: 'auto',
+            paddingBottom: 2,
+          }}
+        >
+          <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b', display: 'flex', alignItems: 'center', gap: 4, marginRight: 2 }}>
+            <Sparkles size={12} style={{ color: '#6366f1' }} /> Mode:
+          </span>
+          {[
+            { id: 'normal', label: 'Normal' },
+            { id: 'think', label: '🧠 Think (CoT)' },
+            { id: 'fun', label: '✨ Fun' },
+            { id: 'deepsearch', label: '🔍 DeepSearch' },
+            { id: 'de-hype', label: '⚡ De-Hype' },
+          ].map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setGrokMode(m.id as any)}
+              style={{
+                border: 'none',
+                background: grokMode === m.id ? '#4f46e5' : '#f1f5f9',
+                color: grokMode === m.id ? '#ffffff' : '#475569',
+                borderRadius: 14,
+                padding: '2px 8px',
+                fontSize: '0.72rem',
+                fontWeight: grokMode === m.id ? 600 : 500,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
         {sourceOpen && (
           <div className="source-input">
             <Link2 size={15} />

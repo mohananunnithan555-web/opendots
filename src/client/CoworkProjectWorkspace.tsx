@@ -24,6 +24,10 @@ import {
   Check,
   ChevronRight,
   ExternalLink,
+  Compass,
+  Radio,
+  Scale,
+  Terminal,
 } from 'lucide-react';
 import { api } from './api';
 import type { Space, WorkspaceState } from '../shared/types';
@@ -120,6 +124,30 @@ export function CoworkProjectWorkspace({
   const [codeSymbolQuery, setCodeSymbolQuery] = useState('');
   const [symbolData, setSymbolData] = useState<any | null>(null);
   const [symbolBusy, setSymbolBusy] = useState(false);
+
+  // Grok DeepSearch States
+  const [deepSearchQuery, setDeepSearchQuery] = useState('Quantum computing commercial breakthroughs 2026');
+  const [deepSearchData, setDeepSearchData] = useState<any | null>(null);
+  const [deepSearchBusy, setDeepSearchBusy] = useState(false);
+
+  // Grok Breaking Stories States
+  const [storiesTopic, setStoriesTopic] = useState('technology');
+  const [storiesData, setStoriesData] = useState<any | null>(null);
+  const [storiesBusy, setStoriesBusy] = useState(false);
+
+  // Grok Code Sandbox States
+  const [sandboxCode, setSandboxCode] = useState(
+    '// Free safe local VM sandbox\nconst items = [12, 45, 68, 23, 91];\nconst avg = items.reduce((a, b) => a + b, 0) / items.length;\nconsole.log("Computed Average:", avg);\nreturn { count: items.length, avg };'
+  );
+  const [sandboxResult, setSandboxResult] = useState<any | null>(null);
+  const [sandboxBusy, setSandboxBusy] = useState(false);
+
+  // Grok Perspective Matrix States
+  const [perspectiveTopic, setPerspectiveTopic] = useState('Remote work vs in-office collaboration for innovation');
+  const [perspectiveSideA, setPerspectiveSideA] = useState('Remote work flexibility');
+  const [perspectiveSideB, setPerspectiveSideB] = useState('In-office spontaneous collaboration');
+  const [perspectiveData, setPerspectiveData] = useState<any | null>(null);
+  const [perspectiveBusy, setPerspectiveBusy] = useState(false);
 
   // File Upload / Create Modal State
   const [showFileModal, setShowFileModal] = useState(false);
@@ -413,6 +441,69 @@ export function CoworkProjectWorkspace({
       setError(e instanceof Error ? e.message : 'Symbol search failed');
     } finally {
       setSymbolBusy(false);
+    }
+  };
+
+  const handleDeepSearch = async () => {
+    if (!deepSearchQuery.trim()) return;
+    setDeepSearchBusy(true);
+    try {
+      const res = await api<any>('/grok/deepsearch', 'POST', { query: deepSearchQuery.trim(), maxSources: 3 });
+      setDeepSearchData(res);
+      setSuccessMsg('Grok DeepSearch completed with verified multi-source synthesis.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'DeepSearch failed');
+    } finally {
+      setDeepSearchBusy(false);
+    }
+  };
+
+  const handleFetchBreakingStories = async () => {
+    setStoriesBusy(true);
+    try {
+      const res = await api<any>(`/grok/breaking-stories?category=${encodeURIComponent(storiesTopic)}&limit=8`);
+      setStoriesData(res);
+      setSuccessMsg(`Fetched ${res.stories?.length || 0} breaking stories from live public feeds.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to fetch breaking stories');
+    } finally {
+      setStoriesBusy(false);
+    }
+  };
+
+  const handleRunSandbox = async () => {
+    if (!sandboxCode.trim()) return;
+    setSandboxBusy(true);
+    try {
+      const res = await api<any>('/grok/sandbox', 'POST', { code: sandboxCode });
+      setSandboxResult(res);
+      if (res.success) {
+        setSuccessMsg('Local VM Sandbox code executed safely.');
+      } else {
+        setError(`Sandbox error: ${res.error}`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sandbox execution failed');
+    } finally {
+      setSandboxBusy(false);
+    }
+  };
+
+  const handleRunPerspective = async () => {
+    if (!perspectiveTopic.trim()) return;
+    setPerspectiveBusy(true);
+    try {
+      const res = await api<any>('/grok/perspective', 'POST', {
+        topic: perspectiveTopic.trim(),
+        perspectiveALabel: perspectiveSideA.trim() || undefined,
+        perspectiveBLabel: perspectiveSideB.trim() || undefined,
+      });
+      setPerspectiveData(res);
+      setSuccessMsg('Perspective Matrix generated with steelmanned viewpoints.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Perspective analysis failed');
+    } finally {
+      setPerspectiveBusy(false);
     }
   };
 
@@ -1501,6 +1592,405 @@ export function CoworkProjectWorkspace({
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </div>
+
+            {/* Tool 5: Grok DeepSearch Engine */}
+            <div
+              style={{
+                background: 'var(--card-bg, #fff)',
+                border: '1px solid var(--border-color, #e5e7eb)',
+                borderRadius: 12,
+                padding: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Compass size={20} style={{ color: '#059669' }} />
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '0.98rem' }}>Grok DeepSearch Engine</h4>
+                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
+                    Autonomous query decomposition, multi-source validation & cross-domain consensus scoring
+                  </small>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type="text"
+                  placeholder="In-depth research query..."
+                  value={deepSearchQuery}
+                  onChange={(e) => setDeepSearchQuery(e.target.value)}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: '1px solid #d1d5db',
+                    fontSize: '0.85rem',
+                  }}
+                />
+                <button className="primary" onClick={handleDeepSearch} disabled={deepSearchBusy}>
+                  {deepSearchBusy ? 'Synthesizing...' : 'Run DeepSearch'}
+                </button>
+              </div>
+
+              {deepSearchData && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: '0.85rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span
+                      style={{
+                        padding: '2px 8px',
+                        borderRadius: 9999,
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        background:
+                          deepSearchData.verificationScore >= 80
+                            ? '#d1fae5'
+                            : deepSearchData.verificationScore >= 60
+                            ? '#fef3c7'
+                            : '#fee2e2',
+                        color:
+                          deepSearchData.verificationScore >= 80
+                            ? '#065f46'
+                            : deepSearchData.verificationScore >= 60
+                            ? '#92400e'
+                            : '#991b1b',
+                      }}
+                    >
+                      {deepSearchData.confidenceLevel || 'Analysis Complete'}
+                    </span>
+                    <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                      Verification Score: {deepSearchData.verificationScore ?? 80}%
+                    </span>
+                  </div>
+
+                  {deepSearchData.subQueries && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {deepSearchData.subQueries.map((sq: string, i: number) => (
+                        <span
+                          key={i}
+                          style={{
+                            fontSize: '0.72rem',
+                            background: '#f3f4f6',
+                            color: '#374151',
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                          }}
+                        >
+                          🔍 {sq}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {deepSearchData.report?.summary && (
+                    <div
+                      style={{
+                        background: '#f9fafb',
+                        padding: 10,
+                        borderRadius: 6,
+                        border: '1px solid #e5e7eb',
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {deepSearchData.report.summary}
+                    </div>
+                  )}
+
+                  {deepSearchData.report?.sources && (
+                    <div style={{ fontSize: '0.78rem', color: '#6b7280' }}>
+                      <strong>Sources:</strong>{' '}
+                      {deepSearchData.report.sources.map((s: any, idx: number) => (
+                        <a
+                          key={idx}
+                          href={s.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: '#2563eb', marginRight: 8, textDecoration: 'none' }}
+                        >
+                          [{idx + 1}] {s.title?.slice(0, 30) || 'Source'}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Tool 6: Breaking Stories Live Feed */}
+            <div
+              style={{
+                background: 'var(--card-bg, #fff)',
+                border: '1px solid var(--border-color, #e5e7eb)',
+                borderRadius: 12,
+                padding: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Radio size={20} style={{ color: '#dc2626' }} />
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '0.98rem' }}>Breaking Stories & Live Pulses</h4>
+                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
+                    Aggregated real-time public feeds with source domains & freshness tags
+                  </small>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select
+                  value={storiesTopic}
+                  onChange={(e) => setStoriesTopic(e.target.value)}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: '1px solid #d1d5db',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <option value="technology">Technology</option>
+                  <option value="ai">Artificial Intelligence</option>
+                  <option value="world">World News</option>
+                  <option value="business">Business</option>
+                </select>
+                <button className="primary" onClick={handleFetchBreakingStories} disabled={storiesBusy}>
+                  {storiesBusy ? 'Fetching Live Feeds...' : 'Refresh Live Feed'}
+                </button>
+              </div>
+
+              {storiesData?.stories && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 280, overflowY: 'auto' }}>
+                  {storiesData.stories.map((st: any, idx: number) => (
+                    <div
+                      key={idx}
+                      style={{
+                        padding: 10,
+                        borderRadius: 8,
+                        background: '#f9fafb',
+                        border: '1px solid #f3f4f6',
+                        fontSize: '0.85rem',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                            color: '#b91c1c',
+                            background: '#fee2e2',
+                            padding: '1px 6px',
+                            borderRadius: 4,
+                          }}
+                        >
+                          LIVE • {st.sourceDomain || 'Public Feed'}
+                        </span>
+                        <span style={{ fontSize: '0.72rem', color: '#6b7280' }}>
+                          {st.publishedAt ? new Date(st.publishedAt).toLocaleTimeString() : 'Recent'}
+                        </span>
+                      </div>
+                      <a
+                        href={st.sourceUrl || st.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ fontWeight: 500, color: '#2563eb', textDecoration: 'none' }}
+                      >
+                        {st.title} <ExternalLink size={12} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Tool 7: Safe Code Sandbox (Isolated Local VM) */}
+            <div
+              style={{
+                background: 'var(--card-bg, #fff)',
+                border: '1px solid var(--border-color, #e5e7eb)',
+                borderRadius: 12,
+                padding: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Terminal size={20} style={{ color: '#d97706' }} />
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '0.98rem' }}>Safe Local VM Code Sandbox</h4>
+                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
+                    Isolated node:vm execution with 2000ms timeout & console output capture
+                  </small>
+                </div>
+              </div>
+
+              <textarea
+                rows={4}
+                value={sandboxCode}
+                onChange={(e) => setSandboxCode(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: 10,
+                  borderRadius: 6,
+                  border: '1px solid #d1d5db',
+                  fontFamily: 'monospace',
+                  fontSize: '0.82rem',
+                }}
+              />
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="primary" onClick={handleRunSandbox} disabled={sandboxBusy}>
+                  {sandboxBusy ? 'Executing...' : 'Run in Local VM'}
+                </button>
+              </div>
+
+              {sandboxResult && (
+                <div
+                  style={{
+                    padding: 10,
+                    borderRadius: 8,
+                    background: sandboxResult.success ? '#1e293b' : '#450a0a',
+                    color: '#f8fafc',
+                    fontFamily: 'monospace',
+                    fontSize: '0.8rem',
+                    maxHeight: 180,
+                    overflowY: 'auto',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, color: sandboxResult.success ? '#4ade80' : '#f87171' }}>
+                    <span>{sandboxResult.success ? '✓ Execution Success' : '✕ Execution Failed'}</span>
+                    <span>{sandboxResult.data?.executionTimeMs ?? 0}ms</span>
+                  </div>
+                  {sandboxResult.data?.logs && sandboxResult.data.logs.length > 0 && (
+                    <div style={{ marginBottom: 6, color: '#94a3b8' }}>
+                      {sandboxResult.data.logs.map((l: string, i: number) => (
+                        <div key={i}>{l}</div>
+                      ))}
+                    </div>
+                  )}
+                  {sandboxResult.data?.result !== undefined && (
+                    <div style={{ color: '#38bdf8' }}>
+                      Result: {JSON.stringify(sandboxResult.data.result, null, 2)}
+                    </div>
+                  )}
+                  {sandboxResult.error && (
+                    <div style={{ color: '#fca5a5' }}>Error: {sandboxResult.error}</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Tool 8: Perspective Matrix & Viewpoint Steelmanning */}
+            <div
+              style={{
+                background: 'var(--card-bg, #fff)',
+                border: '1px solid var(--border-color, #e5e7eb)',
+                borderRadius: 12,
+                padding: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Scale size={20} style={{ color: '#7c3aed' }} />
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '0.98rem' }}>Perspective Matrix ("Both Sides of the Debate")</h4>
+                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
+                    Steelmanned opposing arguments, consensus ground & open critical questions
+                  </small>
+                </div>
+              </div>
+
+              <input
+                type="text"
+                placeholder="Topic of debate (e.g. Remote work vs In-office)..."
+                value={perspectiveTopic}
+                onChange={(e) => setPerspectiveTopic(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #d1d5db',
+                  fontSize: '0.85rem',
+                }}
+              />
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <input
+                  type="text"
+                  placeholder="Side A (optional)"
+                  value={perspectiveSideA}
+                  onChange={(e) => setPerspectiveSideA(e.target.value)}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    border: '1px solid #d1d5db',
+                    fontSize: '0.8rem',
+                  }}
+                />
+                <input
+                  type="text"
+                  placeholder="Side B (optional)"
+                  value={perspectiveSideB}
+                  onChange={(e) => setPerspectiveSideB(e.target.value)}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    border: '1px solid #d1d5db',
+                    fontSize: '0.8rem',
+                  }}
+                />
+              </div>
+
+              <button className="primary" onClick={handleRunPerspective} disabled={perspectiveBusy}>
+                {perspectiveBusy ? 'Analyzing Debates...' : 'Generate Perspective Matrix'}
+              </button>
+
+              {perspectiveData?.data && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: '0.82rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: 10 }}>
+                      <strong style={{ color: '#1e40af', display: 'block', marginBottom: 4 }}>
+                        {perspectiveData.data.perspectiveA?.label || 'Perspective A'}
+                      </strong>
+                      <ul style={{ margin: 0, paddingLeft: 16, color: '#1e3a8a' }}>
+                        {perspectiveData.data.perspectiveA?.arguments?.map((arg: string, i: number) => (
+                          <li key={i}>{arg}</li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div style={{ background: '#fdf4ff', border: '1px solid #f5d0fe', borderRadius: 8, padding: 10 }}>
+                      <strong style={{ color: '#86198f', display: 'block', marginBottom: 4 }}>
+                        {perspectiveData.data.perspectiveB?.label || 'Perspective B'}
+                      </strong>
+                      <ul style={{ margin: 0, paddingLeft: 16, color: '#701a75' }}>
+                        {perspectiveData.data.perspectiveB?.arguments?.map((arg: string, i: number) => (
+                          <li key={i}>{arg}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  {perspectiveData.data.consensusFacts && perspectiveData.data.consensusFacts.length > 0 && (
+                    <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: 8 }}>
+                      <strong style={{ color: '#166534', display: 'block', marginBottom: 2 }}>Shared Consensus:</strong>
+                      <div style={{ color: '#14532d' }}>{perspectiveData.data.consensusFacts.join(' • ')}</div>
+                    </div>
+                  )}
+
+                  {perspectiveData.data.unresolvedQuestions && perspectiveData.data.unresolvedQuestions.length > 0 && (
+                    <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: 8 }}>
+                      <strong style={{ color: '#92400e', display: 'block', marginBottom: 2 }}>Open Questions:</strong>
+                      <div style={{ color: '#78350f' }}>{perspectiveData.data.unresolvedQuestions.join(' • ')}</div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

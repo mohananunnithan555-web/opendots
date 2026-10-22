@@ -273,9 +273,9 @@ describe('Grok-Inspired Free AI Capabilities Suite', () => {
 
       expect(report.query).toBe('software evolution');
       expect(report.sources.length).toBe(2);
-      expect(report.verifiedFacts.length).toBeGreaterThan(0);
-      expect(report.conflictingClaims.length).toBeGreaterThan(0);
-      expect(report.conflictingClaims.some((c) => c.includes('Temporal divergence') || c.includes('licensing') || c.includes('pricing'))).toBe(true);
+      expect(report.verifiedFacts?.length).toBeGreaterThan(0);
+      expect(report.conflictingClaims?.length).toBeGreaterThan(0);
+      expect(report.conflictingClaims?.some((c) => c.includes('Temporal divergence') || c.includes('licensing') || c.includes('pricing'))).toBe(true);
       expect(report.uncertainties.length).toBeGreaterThan(0);
       expect(report.markdownReport).toContain('Deep Research Report: software evolution');
     });

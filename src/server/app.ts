@@ -24,11 +24,16 @@ import {
   unitTestGeneratorTool,
   codeSymbolsTool,
 } from './tools/builtin/code-assistant.js';
+import { codeSandboxTool } from './tools/builtin/code-sandbox.js';
+import { perspectiveMatrixTool } from './tools/builtin/perspective-matrix.js';
 import {
   redditPublicResearchTool,
   youtubePublicResearchTool,
   publicTrendAnalysisTool,
 } from './tools/builtin/social-research.js';
+import { globalGrokDeepSearch } from './research/grok-deep-search.js';
+import { fetchBreakingStories } from './social/breaking-stories.js';
+import { GROK_MODES, applyGrokMode, type GrokPersonaMode } from './persona/grok-modes.js';
 import { executeSafeTool } from './tools/open-dots-tool.js';
 import type {
   ConnectorType,
@@ -1208,6 +1213,49 @@ export function createApp({
       { category, keyword },
       { userPermissions: ['research'], freeOnlyMode: store.settings()?.freeOnlyMode ?? true },
     );
+    return c.json(result);
+  });
+
+  // -------------------------------------------------------------
+  // GROK EXTENDED CAPABILITIES (Think Mode, DeepSearch, Sandbox, Perspective)
+  // -------------------------------------------------------------
+  app.get('/api/grok/modes', (c) => {
+    return c.json({ modes: GROK_MODES });
+  });
+
+  app.post('/api/grok/deepsearch', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const query = typeof body.query === 'string' ? body.query.trim() : '';
+    if (!query) {
+      return c.json({ error: 'query parameter is required for DeepSearch.' }, 400);
+    }
+    const maxSources = typeof body.maxSources === 'number' ? body.maxSources : 4;
+    const result = await globalGrokDeepSearch.executeDeepSearch(query, { maxSources });
+    return c.json(result);
+  });
+
+  app.get('/api/grok/breaking-stories', async (c) => {
+    const category = (c.req.query('category') || 'technology') as any;
+    const limit = Number(c.req.query('limit') || 6);
+    const result = await fetchBreakingStories(category, limit);
+    return c.json(result);
+  });
+
+  app.post('/api/grok/sandbox', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const result = await executeSafeTool(codeSandboxTool, body, {
+      userPermissions: ['basic'],
+      freeOnlyMode: store.settings()?.freeOnlyMode ?? true,
+    });
+    return c.json(result);
+  });
+
+  app.post('/api/grok/perspective', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const result = await executeSafeTool(perspectiveMatrixTool, body, {
+      userPermissions: ['basic'],
+      freeOnlyMode: store.settings()?.freeOnlyMode ?? true,
+    });
     return c.json(result);
   });
 

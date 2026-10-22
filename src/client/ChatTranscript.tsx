@@ -18,6 +18,16 @@ import { isScheduledTaskMessage } from '../shared/scheduled-message';
 import { speakWithGemini } from './speech';
 import { downloadImageFile, parseImageMetadata } from './image-download';
 // These markers only control rendering; they do not confer trust or permissions.
+export function splitThoughts(raw: string): { thoughts: string | null; cleanContent: string } {
+  if (!raw) return { thoughts: null, cleanContent: '' };
+  const match = raw.match(/<thought>([\s\S]*?)<\/thought>/i);
+  if (!match) return { thoughts: null, cleanContent: raw };
+  return {
+    thoughts: match[1].trim(),
+    cleanContent: raw.replace(/<thought>[\s\S]*?<\/thought>/i, '').trim(),
+  };
+}
+
 export function isInternalVoiceReceipt(message: Message): boolean {
   const metadata = message.metadata;
   return (
@@ -424,17 +434,57 @@ export function ChatTranscript({
         .map((call) => (
           <Receipt key={call.id} call={call} />
         ))}
-      {messages.map((message) => (
-        <Fragment key={message.id}>
-          {typeof message.content === 'string' && message.content.trim() && (
-            <div
-              className={`chat-bubble ${message.role}${isScheduledTaskMessage(message) ? ' scheduled' : ''}`}
-            >
-              {isScheduledTaskMessage(message) && (
-                <span className="scheduled-message-label">Scheduled</span>
-              )}
-              <ReactMarkdown
-                components={{
+      {messages.map((message) => {
+        const rawContent = typeof message.content === 'string' ? message.content : '';
+        const { thoughts, cleanContent } = splitThoughts(rawContent);
+        return (
+          <Fragment key={message.id}>
+            {cleanContent.trim() && (
+              <div
+                className={`chat-bubble ${message.role}${isScheduledTaskMessage(message) ? ' scheduled' : ''}`}
+              >
+                {isScheduledTaskMessage(message) && (
+                  <span className="scheduled-message-label">Scheduled</span>
+                )}
+                {thoughts && (
+                  <details
+                    className="grok-thought-box"
+                    style={{
+                      marginBottom: 10,
+                      background: '#f8fafc',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 8,
+                      padding: '8px 12px',
+                    }}
+                  >
+                    <summary
+                      style={{
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        fontSize: '0.82rem',
+                        color: '#334155',
+                      }}
+                    >
+                      🧠 Audited Thinking Process (Chain of Thought)
+                    </summary>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        fontSize: '0.78rem',
+                        color: '#475569',
+                        whiteSpace: 'pre-wrap',
+                        fontFamily: 'monospace',
+                        lineHeight: 1.45,
+                        maxHeight: 240,
+                        overflowY: 'auto',
+                      }}
+                    >
+                      {thoughts}
+                    </div>
+                  </details>
+                )}
+                <ReactMarkdown
+                  components={{
                   img: ({ src, alt }) => <ChatImage src={src} alt={alt} />,
                   a: ({ href, children }) => {
                     if (
@@ -465,7 +515,7 @@ export function ChatTranscript({
                   },
                 }}
               >
-                {String(message.content)}
+                {cleanContent}
               </ReactMarkdown>
               {message.role === 'assistant' && (
                 <div className="chat-bubble-actions">
@@ -479,7 +529,7 @@ export function ChatTranscript({
                       speakingId === message.id ? 'Stop reading' : 'Read aloud'
                     }
                     onClick={() =>
-                      toggleSpeak(message.id, String(message.content))
+                      toggleSpeak(message.id, cleanContent)
                     }
                   >
                     {speakingId === message.id ? (
@@ -499,7 +549,8 @@ export function ChatTranscript({
               <Receipt key={call.id} call={call} />
             ))}
         </Fragment>
-      ))}
+        );
+      })}
     </>
   );
 }
