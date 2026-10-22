@@ -147,7 +147,7 @@ export class TaskPlanner {
     ) {
       steps.push({
         id: randomUUID(),
-        title: 'Evaluate tabular statistics and formulas',
+        title: 'Calculate quantitative metrics and tabular formulas',
         description: 'Parse dataset, calculate statistical distribution, and evaluate formulas.',
         status: 'pending',
         tool: 'analyze_spreadsheet',
@@ -156,6 +156,29 @@ export class TaskPlanner {
         retries: 0,
         maxRetries: 2,
         requiresApproval: false,
+      });
+    }
+
+    // Step 2b: Consequential external communication check (requires approval)
+    if (
+      lower.includes('email') ||
+      lower.includes('notify') ||
+      lower.includes('dispatch') ||
+      lower.includes('message') ||
+      lower.includes('publish')
+    ) {
+      steps.push({
+        id: randomUUID(),
+        title: 'Dispatch email communication to client',
+        description: `Deliver executive summary to external client or stakeholders for: ${goal}`,
+        status: 'pending',
+        tool: 'gmail_workspace',
+        input: { subject: `Update: ${goal.slice(0, 40)}`, body: 'Executive summary report.' },
+        assignedSpecialist: 'writer',
+        retries: 0,
+        maxRetries: 1,
+        requiresApproval: true,
+        approved: false,
       });
     }
 
@@ -498,5 +521,166 @@ export class TaskPlanner {
 
   listPlans(ownerId: string = 'opendots-owner'): TaskPlan[] {
     return this.store.listTaskPlans(ownerId);
+  }
+
+  /**
+   * Autonomous Background Execution Loop.
+   * Runs the plan continuously across steps until done, paused, cancelled, or waiting for approval.
+   */
+  async startAutonomousExecution(
+    planId: string,
+    ownerId: string = 'opendots-owner',
+  ): Promise<TaskPlan> {
+    let plan = this.store.getTaskPlan(planId, ownerId);
+    if (!plan) throw new Error(`Plan "${planId}" not found.`);
+
+    if (plan.status === 'completed' || plan.status === 'cancelled') {
+      return plan;
+    }
+
+    plan.status = 'running';
+    plan = this.store.saveTaskPlan(plan);
+
+    while (plan.status === 'running' && plan.currentStepIndex < plan.steps.length) {
+      // Re-read latest plan from DB in case user clicked Pause or Cancel
+      const freshPlan = this.store.getTaskPlan(planId, ownerId);
+      if (!freshPlan || freshPlan.status === 'paused' || freshPlan.status === 'cancelled') {
+        break;
+      }
+
+      const currentStep = freshPlan.steps[freshPlan.currentStepIndex];
+      if (!currentStep) break;
+
+      // Check dependency steps
+      if (currentStep.dependsOn && currentStep.dependsOn.length > 0) {
+        const unmetDeps = currentStep.dependsOn.filter((depId) => {
+          const depStep = freshPlan.steps.find((s) => s.id === depId);
+          return !depStep || depStep.status !== 'completed';
+        });
+        if (unmetDeps.length > 0) {
+          currentStep.status = 'failed';
+          currentStep.error = `Unmet step dependencies: ${unmetDeps.join(', ')}`;
+          freshPlan.status = 'failed';
+          this.store.saveTaskPlan(freshPlan);
+          break;
+        }
+      }
+
+      // Execute current step
+      const stepRes = await this.executeNextStep(planId, ownerId);
+
+      // Refresh plan
+      const updated = this.store.getTaskPlan(planId, ownerId);
+      if (!updated) break;
+      plan = updated;
+
+      if (stepRes.waitingApproval || plan.status === 'waiting_approval') {
+        // Paused waiting for user approval
+        break;
+      }
+
+      if (plan.status === 'failed') {
+        // Autonomous Replanning Check
+        const failedStep = plan.steps[plan.currentStepIndex];
+        if (failedStep && failedStep.status === 'failed') {
+          const autoReplanned = this.attemptAutonomousReplan(plan, failedStep);
+          if (autoReplanned) {
+            plan = this.store.saveTaskPlan(plan);
+            // Retry step after replanning
+            continue;
+          }
+        }
+        break;
+      }
+
+      if (plan.status === 'completed' || plan.status === 'paused' || plan.status === 'cancelled') {
+        break;
+      }
+
+      // Micro-delay between steps to let other async tasks process
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    return this.store.getTaskPlan(planId, ownerId) || plan;
+  }
+
+  /**
+   * Autonomous Replanning when step retries are exhausted.
+   * Tries intelligent fallback tools or relaxed parameters before failing permanently.
+   */
+  private attemptAutonomousReplan(plan: TaskPlan, step: TaskStep): boolean {
+    if (!step.tool) return false;
+
+    // Fallback 1: deep_research failed -> fallback to read_web_page or search_memory
+    if (step.tool === 'deep_research') {
+      step.tool = 'read_web_page';
+      step.description += ' [Auto-replanned: falling back to direct web reading]';
+      step.status = 'pending';
+      step.retries = 0;
+      step.error = undefined;
+      plan.status = 'running';
+      plan.error = undefined;
+      return true;
+    }
+
+    // Fallback 2: analyze_spreadsheet failed -> fallback to text_analyzer
+    if (step.tool === 'analyze_spreadsheet') {
+      step.tool = 'analyze_text';
+      step.input = { text: JSON.stringify(step.input || {}) };
+      step.description += ' [Auto-replanned: falling back to text analytics]';
+      step.status = 'pending';
+      step.retries = 0;
+      step.error = undefined;
+      plan.status = 'running';
+      plan.error = undefined;
+      return true;
+    }
+
+    // Fallback 3: generate_office_document failed -> fallback to export_workspace_document
+    if (step.tool === 'generate_office_document') {
+      step.tool = 'export_workspace_document';
+      step.input = { title: step.title, content: `# ${step.title}\n\nDeliverable generated by autonomous replanner.` };
+      step.description += ' [Auto-replanned: falling back to workspace document export]';
+      step.status = 'pending';
+      step.retries = 0;
+      step.error = undefined;
+      plan.status = 'running';
+      plan.error = undefined;
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Crash & Server Restart Recovery.
+   * Finds all plans in 'running' or 'pending' state and resumes their execution automatically.
+   */
+  async recoverPendingPlans(ownerId: string = 'opendots-owner'): Promise<number> {
+    const plans = this.store.listTaskPlans(ownerId);
+    const interruptedPlans = plans.filter(
+      (p) => p.status === 'running' || (p.status === 'pending' && p.currentStepIndex < p.steps.length),
+    );
+
+    let count = 0;
+    for (const plan of interruptedPlans) {
+      // If a step was left running when the server shut down, reset it to pending
+      for (const step of plan.steps) {
+        if (step.status === 'running') {
+          step.status = 'pending';
+        }
+      }
+      this.store.saveTaskPlan(plan);
+
+      // Launch autonomous execution in background (do not await so startup is fast)
+      void this.startAutonomousExecution(plan.id, plan.ownerId).catch((err) => {
+        if (!String(err).includes('database is not open')) {
+          console.warn(`Plan recovery failed for plan ${plan.id}:`, err);
+        }
+      });
+      count++;
+    }
+
+    return count;
   }
 }

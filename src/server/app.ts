@@ -35,6 +35,8 @@ import { globalGrokDeepSearch } from './research/grok-deep-search.js';
 import { fetchBreakingStories } from './social/breaking-stories.js';
 import { GROK_MODES, applyGrokMode, type GrokPersonaMode } from './persona/grok-modes.js';
 import { executeSafeTool } from './tools/open-dots-tool.js';
+import { globalActionReviewEngine, type CustomRule, type ActionPolicyDecision } from './tools/action-review.js';
+import { ProactiveResearchService, type ProactiveMonitor } from './research/proactive-monitor.js';
 import type {
   ConnectorType,
   ApprovalActionType,
@@ -67,6 +69,7 @@ export function createApp({
 }: AppOptions) {
   const app = new Hono();
   const taskPlanner = new TaskPlanner(store);
+  const proactiveService = new ProactiveResearchService(store);
   app.use(
     '/api/*',
     bodyLimit({
@@ -267,15 +270,30 @@ export function createApp({
     const events = store.recentEvents(limit);
     const plans = store.listTaskPlans();
     const memories = store.memoriesV2({ limit: 30 });
+    const approvals = store.approvals('opendots-owner', 'pending');
+    const monitors = store.proactiveMonitors('opendots-owner');
 
     const feed: Array<{
       id: string;
-      type: 'task' | 'plan' | 'memory';
+      type: 'task' | 'plan' | 'memory' | 'approval' | 'monitor';
       title: string;
       description: string;
       status?: string;
       timestamp: number;
+      data?: unknown;
     }> = [];
+
+    for (const approval of approvals) {
+      feed.push({
+        id: `approval-${approval.id}`,
+        type: 'approval',
+        title: `Pending Approval: ${approval.title}`,
+        description: `${approval.description} (Destination: ${approval.destination || 'External Tool'})`,
+        status: 'waiting_approval',
+        timestamp: approval.createdAt,
+        data: approval,
+      });
+    }
 
     for (const event of events) {
       feed.push({
@@ -296,6 +314,7 @@ export function createApp({
         description: `Status: ${plan.status} (${completed}/${plan.steps.length} steps completed)`,
         status: plan.status,
         timestamp: plan.updatedAt || plan.createdAt,
+        data: plan,
       });
     }
 
@@ -306,6 +325,18 @@ export function createApp({
         title: `Memory Saved [${mem.category}]`,
         description: mem.text.slice(0, 80) + (mem.text.length > 80 ? '...' : ''),
         timestamp: mem.updatedAt || mem.createdAt,
+      });
+    }
+
+    for (const mon of monitors) {
+      feed.push({
+        id: `monitor-${mon.id}`,
+        type: 'monitor',
+        title: `Standing Monitor: ${mon.topic}`,
+        description: mon.lastResultSummary || `Checked every ${mon.intervalMinutes}m`,
+        status: mon.status,
+        timestamp: mon.lastCheckedAt || mon.createdAt,
+        data: mon,
       });
     }
 
@@ -509,17 +540,44 @@ export function createApp({
 
   app.post('/api/plans', async (c) => {
     const parsed = z
-      .object({ goal: z.string().trim().min(1).max(2000) })
+      .object({
+        goal: z.string().trim().min(1).max(2000),
+        autoRun: z.boolean().optional(),
+        projectId: z.string().optional(),
+      })
       .strict()
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {
       return c.json({ error: 'Goal is required and must be under 2,000 characters.' }, 400);
     }
     try {
-      const plan = taskPlanner.createPlan(parsed.data.goal);
+      const plan = taskPlanner.createPlan(parsed.data.goal, 'opendots-owner', parsed.data.projectId);
+      if (parsed.data.autoRun) {
+        void taskPlanner.startAutonomousExecution(plan.id).catch((err) => {
+          console.warn('Autonomous execution error:', err);
+        });
+      }
       return c.json(plan, 201);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Failed to create plan.' }, 400);
+    }
+  });
+
+  app.post('/api/plans/:id/run', async (c) => {
+    const plan = taskPlanner.getPlan(c.req.param('id'));
+    if (!plan) return c.json({ error: 'Plan not found.' }, 404);
+    try {
+      const wait = c.req.query('wait') === 'true';
+      if (wait) {
+        const finished = await taskPlanner.startAutonomousExecution(plan.id);
+        return c.json(finished);
+      }
+      void taskPlanner.startAutonomousExecution(plan.id).catch((err) => {
+        console.warn('Autonomous execution error:', err);
+      });
+      return c.json({ ok: true, planId: plan.id, status: 'running' });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Run failed.' }, 400);
     }
   });
 
@@ -1011,6 +1069,134 @@ export function createApp({
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Decision failed.' }, 400);
     }
+  });
+
+  // -------------------------------------------------------------
+  // CUSTOM RULES & ACTION REVIEW (ChatGPT Dots Action Review Policy)
+  // -------------------------------------------------------------
+  app.get('/api/rules', (c) => {
+    return c.json(store.customRules('opendots-owner'));
+  });
+
+  app.get('/api/rules/:id', (c) => {
+    const rule = store.getCustomRule(c.req.param('id'), 'opendots-owner');
+    return rule ? c.json(rule) : c.json({ error: 'Rule not found.' }, 404);
+  });
+
+  app.post('/api/rules', async (c) => {
+    const parsed = z
+      .object({
+        name: z.string().trim().min(1).max(200),
+        pattern: z.string().trim().min(1).max(200),
+        category: z.enum([
+          'file_operations',
+          'network_external',
+          'code_execution',
+          'system_settings',
+          'communication',
+          'general',
+        ]).default('general'),
+        policy: z.enum([
+          'take_action_without_asking',
+          'take_action_when_pre_approved',
+          'ask_before_taking_action',
+          'hand_off_to_you',
+        ]),
+        description: z.string().trim().max(1000).default(''),
+        enabled: z.boolean().default(true),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+
+    if (!parsed.success) {
+      return c.json({ error: 'Invalid custom rule specification.' }, 400);
+    }
+
+    const created = store.createCustomRule(parsed.data);
+    return c.json(created, 201);
+  });
+
+  app.put('/api/rules/:id', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const updated = store.updateCustomRule(c.req.param('id'), body, 'opendots-owner');
+    return updated ? c.json(updated) : c.json({ error: 'Rule not found.' }, 404);
+  });
+
+  app.delete('/api/rules/:id', (c) => {
+    const deleted = store.deleteCustomRule(c.req.param('id'), 'opendots-owner');
+    return c.json({ ok: deleted });
+  });
+
+  app.post('/api/actions/evaluate', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.actionName) {
+      return c.json({ error: 'actionName is required.' }, 400);
+    }
+    const rules = store.customRules('opendots-owner');
+    const result = globalActionReviewEngine.evaluate(
+      {
+        actionName: body.actionName,
+        category: body.category,
+        payload: body.payload || {},
+        description: body.description,
+        isDestructive: Boolean(body.isDestructive),
+        involvesFinancials: Boolean(body.involvesFinancials),
+        involvesCredentials: Boolean(body.involvesCredentials),
+        isExternalCommunication: Boolean(body.isExternalCommunication),
+      },
+      rules,
+    );
+    return c.json(result);
+  });
+
+  // -------------------------------------------------------------
+  // PROACTIVE MONITORS (ChatGPT Dots Standing Monitoring)
+  // -------------------------------------------------------------
+  app.get('/api/proactive-monitors', (c) => {
+    return c.json(store.proactiveMonitors('opendots-owner'));
+  });
+
+  app.post('/api/proactive-monitors', async (c) => {
+    const parsed = z
+      .object({
+        topic: z.string().trim().min(1).max(500),
+        sources: z.array(z.string()).default([]),
+        intervalMinutes: z.number().int().min(5).max(10080).default(60),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+
+    if (!parsed.success) {
+      return c.json({ error: 'Valid topic is required.' }, 400);
+    }
+
+    const monitor: ProactiveMonitor = {
+      id: randomUUID(),
+      ownerId: 'opendots-owner',
+      topic: parsed.data.topic,
+      sources: parsed.data.sources,
+      intervalMinutes: parsed.data.intervalMinutes,
+      status: 'active',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    const saved = store.saveProactiveMonitor(monitor);
+    return c.json(saved, 201);
+  });
+
+  app.post('/api/proactive-monitors/:id/check', async (c) => {
+    try {
+      const result = await proactiveService.checkMonitor(c.req.param('id'), 'opendots-owner');
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Monitor check failed.' }, 400);
+    }
+  });
+
+  app.delete('/api/proactive-monitors/:id', (c) => {
+    const deleted = store.deleteProactiveMonitor(c.req.param('id'), 'opendots-owner');
+    return c.json({ ok: deleted });
   });
 
   // -------------------------------------------------------------

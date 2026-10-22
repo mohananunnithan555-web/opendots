@@ -1,5 +1,6 @@
 import { defineTool } from '@copilotkit/runtime/v2';
 import { redactSecrets } from '../skills/skill-logger.js';
+import { globalActionReviewEngine } from './action-review.js';
 import type {
   OpenDotsToolDefinition,
   ToolExecutionContext,
@@ -76,6 +77,33 @@ export async function executeSafeTool<TInput, TOutput>(
     return {
       success: false,
       error: `Execution blocked: Tool "${tool.name}" requires paid API credits or fees ($${tool.costEstimateUsd ?? 'paid'}). Free-Only Mode is active (strict ₹0 / $0 policy).`,
+      executionTimeMs: 0,
+    };
+  }
+
+  // 0.8 Action Review & Custom Rules Hard Safeguard Check (ChatGPT Dots Policy)
+  const reviewResult = globalActionReviewEngine.evaluate(
+    {
+      actionName: tool.name,
+      description: tool.description,
+      payload: (rawInput as Record<string, unknown>) || {},
+      userId: ctx.userId,
+    },
+    ctx.customRules || [],
+  );
+
+  if (reviewResult.decision === 'hand_off_to_you') {
+    return {
+      success: false,
+      error: `Action Prohibited by Action Policy (${reviewResult.reason}): Hand-off required. The agent cannot execute this action autonomously.`,
+      executionTimeMs: 0,
+    };
+  }
+
+  if (tool.requiresApproval && reviewResult.requiresHumanApproval && !ctx.approved) {
+    return {
+      success: false,
+      error: `Approval Required: Action "${tool.name}" requires explicit user confirmation before execution.`,
       executionTimeMs: 0,
     };
   }

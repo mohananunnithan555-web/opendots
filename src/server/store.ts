@@ -11,6 +11,8 @@ import {
 } from './memory-types.js';
 import type { TaskPlan } from './planner/types.js';
 import type { CustomSkillRecord } from './skills/types.js';
+import type { CustomRule } from './tools/action-review.js';
+import type { ProactiveMonitor } from './research/proactive-monitor.js';
 import type {
   Action,
   Approval,
@@ -71,6 +73,7 @@ export class Store {
         confidence REAL DEFAULT 1.0,
         pinned INTEGER DEFAULT 0,
         source TEXT NOT NULL DEFAULT 'user_explicit',
+        projectId TEXT,
         createdAt INTEGER NOT NULL,
         updatedAt INTEGER NOT NULL,
         lastAccessedAt INTEGER
@@ -183,7 +186,33 @@ export class Store {
         createdAt INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS notifications_owner_created ON notifications(ownerId, createdAt DESC);
-      CREATE INDEX IF NOT EXISTS notifications_owner_unread ON notifications(ownerId, isRead);`);
+      CREATE INDEX IF NOT EXISTS notifications_owner_unread ON notifications(ownerId, isRead);
+      CREATE TABLE IF NOT EXISTS custom_rules (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT NOT NULL DEFAULT 'opendots-owner',
+        name TEXT NOT NULL,
+        pattern TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'general',
+        policy TEXT NOT NULL DEFAULT 'take_action_without_asking',
+        description TEXT NOT NULL DEFAULT '',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS custom_rules_owner ON custom_rules(ownerId, createdAt DESC);
+      CREATE TABLE IF NOT EXISTS proactive_monitors (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT NOT NULL DEFAULT 'opendots-owner',
+        topic TEXT NOT NULL,
+        sourcesJson TEXT NOT NULL DEFAULT '[]',
+        intervalMinutes INTEGER NOT NULL DEFAULT 60,
+        lastCheckedAt INTEGER,
+        lastResultSummary TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS proactive_monitors_owner ON proactive_monitors(ownerId, status);`);
 
     // Ensure conditional task monitoring columns exist
     try {
@@ -203,6 +232,13 @@ export class Store {
       const planColNames = new Set(planCols.map((c) => c.name));
       if (!planColNames.has('spaceId')) this.db.exec('ALTER TABLE task_plans ADD COLUMN spaceId TEXT');
       if (!planColNames.has('projectId')) this.db.exec('ALTER TABLE task_plans ADD COLUMN projectId TEXT');
+    } catch {}
+
+    // Ensure memories_v2 projectId column exists
+    try {
+      const memCols = this.db.prepare('PRAGMA table_info(memories_v2)').all() as Array<{ name: string }>;
+      const memColNames = new Set(memCols.map((c) => c.name));
+      if (!memColNames.has('projectId')) this.db.exec('ALTER TABLE memories_v2 ADD COLUMN projectId TEXT');
     } catch {}
 
     // Migrate any legacy rows into memories_v2
@@ -706,6 +742,10 @@ export class Store {
       query += ' AND category = ?';
       params.push(filter.category);
     }
+    if (filter?.projectId) {
+      query += ' AND projectId = ?';
+      params.push(filter.projectId);
+    }
     if (filter?.pinnedOnly) {
       query += ' AND pinned = 1';
     }
@@ -729,6 +769,7 @@ export class Store {
       confidence: number;
       pinned: number;
       source: string;
+      projectId?: string | null;
       createdAt: number;
       updatedAt: number;
       lastAccessedAt: number | null;
@@ -739,6 +780,7 @@ export class Store {
       category: row.category as MemoryCategory,
       pinned: Boolean(row.pinned),
       source: row.source as 'user_explicit' | 'agent_inferred',
+      projectId: row.projectId ?? undefined,
       lastAccessedAt: row.lastAccessedAt ?? undefined,
     }));
   }
@@ -760,6 +802,7 @@ export class Store {
     confidence?: number;
     pinned?: boolean;
     source?: 'user_explicit' | 'agent_inferred';
+    projectId?: string;
   }): MemoryRecord {
     const rawText = options.text.trim();
     if (!rawText) {
@@ -780,6 +823,7 @@ export class Store {
     const confidence = options.confidence ?? 1.0;
     const pinned = options.pinned ? 1 : 0;
     const source = options.source ?? 'user_explicit';
+    const projectId = options.projectId ?? null;
     const now = Date.now();
 
     // Check for similar memory in the same category to update instead of duplicating
@@ -794,13 +838,14 @@ export class Store {
     this.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO memories_v2 (id, ownerId, category, text, confidence, pinned, source, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO memories_v2 (id, ownerId, category, text, confidence, pinned, source, projectId, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              text=excluded.text,
              category=excluded.category,
              confidence=excluded.confidence,
              pinned=excluded.pinned,
+             projectId=excluded.projectId,
              updatedAt=excluded.updatedAt`,
         )
         .run(
@@ -811,6 +856,7 @@ export class Store {
           confidence,
           pinned,
           source,
+          projectId,
           now,
           now,
         );
@@ -2176,5 +2222,202 @@ export class Store {
     } catch {
       return false;
     }
+  }
+
+  // -------------------------------------------------------------
+  // CUSTOM RULES (ChatGPT Dots Auto-Review & Rules)
+  // -------------------------------------------------------------
+  customRules(ownerId = 'opendots-owner'): CustomRule[] {
+    try {
+      const rows = this.db
+        .prepare('SELECT * FROM custom_rules WHERE ownerId = ? ORDER BY createdAt DESC')
+        .all(ownerId) as Array<{
+          id: string;
+          ownerId: string;
+          name: string;
+          pattern: string;
+          category: string;
+          policy: string;
+          description: string;
+          enabled: number;
+          createdAt: number;
+          updatedAt: number;
+        }>;
+      return rows.map((r) => ({
+        id: r.id,
+        ownerId: r.ownerId,
+        name: r.name,
+        pattern: r.pattern,
+        category: r.category as any,
+        policy: r.policy as any,
+        description: r.description,
+        enabled: Boolean(r.enabled),
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  getCustomRule(id: string, ownerId = 'opendots-owner'): CustomRule | undefined {
+    return this.customRules(ownerId).find((r) => r.id === id);
+  }
+
+  createCustomRule(
+    data: Omit<CustomRule, 'id' | 'createdAt' | 'updatedAt' | 'ownerId'> & { id?: string; ownerId?: string },
+  ): CustomRule {
+    const id = data.id || randomUUID();
+    const now = Date.now();
+    const rule: CustomRule = {
+      id,
+      ownerId: data.ownerId || 'opendots-owner',
+      name: data.name,
+      pattern: data.pattern,
+      category: data.category || 'general',
+      policy: data.policy || 'take_action_without_asking',
+      description: data.description || '',
+      enabled: data.enabled !== false,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.db
+      .prepare(
+        `INSERT INTO custom_rules (id, ownerId, name, pattern, category, policy, description, enabled, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        rule.id,
+        rule.ownerId,
+        rule.name,
+        rule.pattern,
+        rule.category,
+        rule.policy,
+        rule.description,
+        rule.enabled ? 1 : 0,
+        rule.createdAt,
+        rule.updatedAt,
+      );
+
+    return rule;
+  }
+
+  updateCustomRule(
+    id: string,
+    updates: Partial<CustomRule>,
+    ownerId = 'opendots-owner',
+  ): CustomRule | undefined {
+    const existing = this.getCustomRule(id, ownerId);
+    if (!existing) return undefined;
+
+    const updated: CustomRule = {
+      ...existing,
+      ...updates,
+      updatedAt: Date.now(),
+    };
+
+    this.db
+      .prepare(
+        `UPDATE custom_rules SET
+           name = ?, pattern = ?, category = ?, policy = ?, description = ?, enabled = ?, updatedAt = ?
+         WHERE id = ? AND ownerId = ?`,
+      )
+      .run(
+        updated.name,
+        updated.pattern,
+        updated.category,
+        updated.policy,
+        updated.description,
+        updated.enabled ? 1 : 0,
+        updated.updatedAt,
+        id,
+        ownerId,
+      );
+
+    return updated;
+  }
+
+  deleteCustomRule(id: string, ownerId = 'opendots-owner'): boolean {
+    const result = this.db
+      .prepare('DELETE FROM custom_rules WHERE id = ? AND ownerId = ?')
+      .run(id, ownerId);
+    return Boolean(result.changes);
+  }
+
+  // -------------------------------------------------------------
+  // PROACTIVE MONITORS (ChatGPT Dots Standing Monitoring)
+  // -------------------------------------------------------------
+  proactiveMonitors(ownerId = 'opendots-owner'): ProactiveMonitor[] {
+    try {
+      const rows = this.db
+        .prepare('SELECT * FROM proactive_monitors WHERE ownerId = ? ORDER BY createdAt DESC')
+        .all(ownerId) as Array<{
+          id: string;
+          ownerId: string;
+          topic: string;
+          sourcesJson: string;
+          intervalMinutes: number;
+          lastCheckedAt: number | null;
+          lastResultSummary: string | null;
+          status: string;
+          createdAt: number;
+          updatedAt: number;
+        }>;
+      return rows.map((r) => ({
+        id: r.id,
+        ownerId: r.ownerId,
+        topic: r.topic,
+        sources: JSON.parse(r.sourcesJson || '[]'),
+        intervalMinutes: r.intervalMinutes,
+        lastCheckedAt: r.lastCheckedAt ?? undefined,
+        lastResultSummary: r.lastResultSummary ?? undefined,
+        status: r.status as 'active' | 'paused',
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  getProactiveMonitor(id: string, ownerId = 'opendots-owner'): ProactiveMonitor | undefined {
+    return this.proactiveMonitors(ownerId).find((m) => m.id === id);
+  }
+
+  saveProactiveMonitor(monitor: ProactiveMonitor): ProactiveMonitor {
+    this.db
+      .prepare(
+        `INSERT INTO proactive_monitors (id, ownerId, topic, sourcesJson, intervalMinutes, lastCheckedAt, lastResultSummary, status, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           topic = excluded.topic,
+           sourcesJson = excluded.sourcesJson,
+           intervalMinutes = excluded.intervalMinutes,
+           lastCheckedAt = excluded.lastCheckedAt,
+           lastResultSummary = excluded.lastResultSummary,
+           status = excluded.status,
+           updatedAt = excluded.updatedAt`,
+      )
+      .run(
+        monitor.id,
+        monitor.ownerId,
+        monitor.topic,
+        JSON.stringify(monitor.sources || []),
+        monitor.intervalMinutes || 60,
+        monitor.lastCheckedAt || null,
+        monitor.lastResultSummary || null,
+        monitor.status || 'active',
+        monitor.createdAt,
+        monitor.updatedAt,
+      );
+    return monitor;
+  }
+
+  deleteProactiveMonitor(id: string, ownerId = 'opendots-owner'): boolean {
+    const result = this.db
+      .prepare('DELETE FROM proactive_monitors WHERE id = ? AND ownerId = ?')
+      .run(id, ownerId);
+    return Boolean(result.changes);
   }
 }

@@ -7,6 +7,8 @@ export interface ToolExecutionContext {
   userPermissions?: SkillPermission[];
   signal?: AbortSignal;
   freeOnlyMode?: boolean;
+  approved?: boolean;
+  customRules?: any[];
 }
 
 export interface ToolExecutionResult<TOutput = unknown> {

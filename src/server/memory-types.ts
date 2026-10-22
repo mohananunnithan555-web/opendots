@@ -6,6 +6,9 @@ export const MemoryCategorySchema = z.enum([
   'project',
   'conversation_summary',
   'task_context',
+  'responsibility',
+  'decision',
+  'lesson',
 ]);
 
 export type MemoryCategory = z.infer<typeof MemoryCategorySchema>;
@@ -18,6 +21,7 @@ export interface MemoryRecord {
   confidence: number;
   pinned: boolean;
   source: 'user_explicit' | 'agent_inferred';
+  projectId?: string;
   createdAt: number;
   updatedAt: number;
   lastAccessedAt?: number;
@@ -28,6 +32,7 @@ export interface MemoryFilter {
   query?: string;
   limit?: number;
   pinnedOnly?: boolean;
+  projectId?: string;
 }
 
 /**

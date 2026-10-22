@@ -165,37 +165,37 @@ export function synthesizeResearchReport(
   md += `## 1. Executive Summary\n\n`;
   md += `Synthesized investigation covering **"${query}"** from ${sanitizedSources.length} verified web sources. Key claims have been cross-checked, deduplicated, and mapped to citations below.\n\n`;
 
-  md += `## 2. Source Comparison & Matrix\n\n`;
+  md += `## 2. Key Verified Findings & Comparison Matrix\n\n`;
   md += `${comparisonTable}\n\n`;
 
-  md += `## 3. Verified Facts & Findings\n\n`;
+  md += `### Verified Facts\n\n`;
   (verifiedFacts.length > 0 ? verifiedFacts : keyFindings).forEach((fact) => {
     md += `- ✅ ${fact}\n`;
   });
   md += `\n`;
 
   if (conflictingClaims.length > 0) {
-    md += `## 4. Conflicting Claims & Divergences\n\n`;
+    md += `## 3. Conflicting Claims & Divergences\n\n`;
     conflictingClaims.forEach((c) => {
       md += `- ⚖️ ${c}\n`;
     });
     md += `\n`;
   }
 
-  md += `## 5. Multi-Source Comparative Analysis\n\n`;
+  md += `## 4. Multi-Source Comparative Analysis\n\n`;
   comparisons.forEach((comp) => {
     md += `- ${comp}\n`;
   });
   md += `\n`;
 
   if (uncertainties.length > 0) {
-    md += `## 6. Uncertainties & Unverified Claims\n\n`;
+    md += `### Uncertainties & Unverified Claims\n\n`;
     uncertainties.forEach((unc) => {
       md += `> ⚠️ **Caution**: ${unc}\n\n`;
     });
   }
 
-  md += `## 7. References & Verified Sources\n\n`;
+  md += `## 5. References & Verified Sources\n\n`;
   sanitizedSources.forEach((src) => {
     md += `[${src.index}] [${src.title}](${src.url})\n`;
     if (src.snippet) {

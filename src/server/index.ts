@@ -9,6 +9,8 @@ import { createApp } from './app.js';
 import { resolveAppOrigins } from './app-origin.js';
 import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
+import { TaskPlanner } from './planner/task-planner.js';
+import { ProactiveResearchService } from './research/proactive-monitor.js';
 import {
   agentRunTimeoutMsFromEnv,
   intelligenceApiKeyFromEnv,
@@ -117,6 +119,19 @@ app.get('*', serveStatic({ path: './dist/client/index.html' }));
 const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   console.log(`OpenDots template listening on http://${host}:${info.port}`);
   runner.start();
+
+  // Auto-recover any pending or interrupted plans across server restart
+  const taskPlanner = new TaskPlanner(store);
+  void taskPlanner.recoverPendingPlans().then((count) => {
+    if (count > 0) console.log(`[TaskPlanner] Recovered ${count} interrupted autonomous plan(s).`);
+  });
+
+  // Auto-run due proactive monitors
+  const proactiveService = new ProactiveResearchService(store);
+  void proactiveService.runDueMonitors().then((res) => {
+    if (res.length > 0) console.log(`[ProactiveMonitor] Checked ${res.length} standing monitor(s).`);
+  });
+
   void platform
     .start()
     .catch((error) =>
