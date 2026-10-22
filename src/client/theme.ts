@@ -21,9 +21,10 @@ export function resolveTheme(preference: ThemePreference, systemDark: boolean) {
 function apply() {
   const theme = resolveTheme(themePreference(), query().matches);
   document.documentElement.dataset.theme = theme;
+  document.documentElement.classList?.toggle('dark', theme === 'dark');
   document
     .querySelector('meta[name="theme-color"]')
-    ?.setAttribute('content', theme === 'dark' ? '#1b1b1b' : '#f8f7f4');
+    ?.setAttribute('content', theme === 'dark' ? '#090B10' : '#FAF9F6');
 }
 export function setThemePreference(preference: ThemePreference) {
   chosen = preference;
