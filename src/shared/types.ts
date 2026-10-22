@@ -121,6 +121,7 @@ export type NotificationType =
   | 'monitoring_alert'
   | 'conditional_trigger'
   | 'deadline_approaching'
+  | 'reminder'
   | 'info_required';
 
 export type NotificationPriority = 'low' | 'medium' | 'high' | 'urgent';
@@ -343,3 +344,71 @@ export interface WorkspaceState {
   setup: SetupStatus;
   calls: CallReceipt[];
 }
+
+export type ReminderRecurrenceType = 'none' | 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'custom_cron';
+
+export type ReminderRecurrence =
+  | ReminderRecurrenceType
+  | {
+      type: ReminderRecurrenceType;
+      interval?: number;
+      timeOfDay?: string;
+    };
+
+export type ReminderStatus =
+  | 'scheduled'
+  | 'pending'
+  | 'monitoring'
+  | 'event_monitoring'
+  | 'triggered'
+  | 'snoozed'
+  | 'completed'
+  | 'cancelled'
+  | 'failed';
+
+export interface Reminder {
+  id: string;
+  ownerId: string;
+  userId?: string;
+  title: string;
+  message?: string;
+  scheduledAt: number;
+  dueAt?: number | null;
+  originalScheduledAt: number;
+  timezone: string;
+  recurrence: ReminderRecurrence;
+  recurrenceRule?: string;
+  status: ReminderStatus;
+  isEventMonitoring?: boolean;
+  eventQuery?: string;
+  targetEvent?: string;
+  eventSource?: string;
+  eventTargetTimeStr?: string;
+  deliveryChannels: ('push' | 'in_app' | 'speech')[];
+  lastTriggeredAt?: number;
+  triggerCount: number;
+  snoozeCount: number;
+  snoozedUntil?: number;
+  completedAt?: number;
+  cancelledAt?: number;
+  failureReason?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PushSubscriptionKeys {
+  p256dh: string;
+  auth: string;
+}
+
+export interface WebPushSubscription {
+  id: string;
+  ownerId: string;
+  userId?: string;
+  endpoint: string;
+  keys: PushSubscriptionKeys;
+  userAgent?: string;
+  createdAt: number;
+  lastUsedAt?: number;
+}
+

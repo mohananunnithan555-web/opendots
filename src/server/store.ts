@@ -28,6 +28,10 @@ import type {
   Notification,
   NotificationPriority,
   NotificationType,
+  Reminder,
+  ReminderRecurrence,
+  ReminderStatus,
+  WebPushSubscription,
   Result,
   Run,
   Settings,
@@ -212,7 +216,45 @@ export class Store {
         createdAt INTEGER NOT NULL,
         updatedAt INTEGER NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS proactive_monitors_owner ON proactive_monitors(ownerId, status);`);
+      CREATE INDEX IF NOT EXISTS proactive_monitors_owner ON proactive_monitors(ownerId, status);
+      CREATE TABLE IF NOT EXISTS reminders (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT NOT NULL DEFAULT 'opendots-owner',
+        title TEXT NOT NULL,
+        message TEXT,
+        scheduledAt INTEGER NOT NULL,
+        originalScheduledAt INTEGER NOT NULL,
+        timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata',
+        recurrence TEXT NOT NULL DEFAULT 'none',
+        recurrenceRule TEXT,
+        status TEXT NOT NULL DEFAULT 'scheduled',
+        isEventMonitoring INTEGER NOT NULL DEFAULT 0,
+        eventQuery TEXT,
+        eventSource TEXT,
+        eventTargetTimeStr TEXT,
+        deliveryChannelsJson TEXT NOT NULL DEFAULT '["push","in_app","speech"]',
+        lastTriggeredAt INTEGER,
+        triggerCount INTEGER NOT NULL DEFAULT 0,
+        snoozeCount INTEGER NOT NULL DEFAULT 0,
+        snoozedUntil INTEGER,
+        completedAt INTEGER,
+        cancelledAt INTEGER,
+        failureReason TEXT,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS reminders_due ON reminders(ownerId, status, scheduledAt ASC);
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT NOT NULL DEFAULT 'opendots-owner',
+        endpoint TEXT NOT NULL UNIQUE,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        userAgent TEXT,
+        createdAt INTEGER NOT NULL,
+        lastUsedAt INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS push_subs_owner ON push_subscriptions(ownerId);`);
 
     // Ensure conditional task monitoring columns exist
     try {
@@ -2439,5 +2481,385 @@ export class Store {
       .prepare('DELETE FROM proactive_monitors WHERE id = ? AND ownerId = ?')
       .run(id, ownerId);
     return Boolean(result.changes);
+  }
+
+  // -------------------------------------------------------------
+  // REMINDERS & WEB PUSH SUBSCRIPTIONS
+  // -------------------------------------------------------------
+  reminders(
+    ownerIdOrOptions?: string | { status?: ReminderStatus | string; ownerId?: string },
+    status?: ReminderStatus | string,
+  ): Reminder[] {
+    try {
+      let ownerId: string | undefined;
+      let targetStatus = status;
+
+      if (typeof ownerIdOrOptions === 'object' && ownerIdOrOptions !== null) {
+        ownerId = ownerIdOrOptions.ownerId;
+        targetStatus = ownerIdOrOptions.status;
+      } else if (typeof ownerIdOrOptions === 'string') {
+        ownerId = ownerIdOrOptions;
+      }
+
+      let query = 'SELECT * FROM reminders WHERE 1=1';
+      const params: any[] = [];
+      if (ownerId && ownerId !== 'opendots-owner') {
+        query += ' AND ownerId = ?';
+        params.push(ownerId);
+      }
+      if (targetStatus) {
+        if (targetStatus === 'pending' || targetStatus === 'scheduled') {
+          query += " AND status IN ('pending', 'scheduled')";
+        } else {
+          query += ' AND status = ?';
+          params.push(targetStatus);
+        }
+      }
+      query += ' ORDER BY scheduledAt ASC';
+      const rows = this.db.prepare(query).all(...params) as any[];
+      return rows.map((r) => this.rowToReminder(r));
+    } catch {
+      return [];
+    }
+  }
+
+  getReminder(id: string, ownerId?: string): Reminder | undefined {
+    try {
+      let query = 'SELECT * FROM reminders WHERE id = ?';
+      const params: any[] = [id];
+      if (ownerId && ownerId !== 'opendots-owner') {
+        query += ' AND ownerId = ?';
+        params.push(ownerId);
+      }
+      const row = this.db.prepare(query).get(...params) as any;
+      return row ? this.rowToReminder(row) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  dueReminders(now = Date.now()): Reminder[] {
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM reminders
+           WHERE status IN ('scheduled', 'snoozed', 'pending')
+           AND scheduledAt IS NOT NULL
+           AND scheduledAt <= ?
+           ORDER BY scheduledAt ASC`,
+        )
+        .all(now) as any[];
+      return rows.map((r) => this.rowToReminder(r));
+    } catch {
+      return [];
+    }
+  }
+
+  createReminder(
+    data: any,
+  ): Reminder {
+    const now = Date.now();
+    const scheduled = data.scheduledAt !== undefined ? data.scheduledAt : (data.dueAt !== undefined ? data.dueAt : (data.targetEvent || data.isEventMonitoring ? null : now));
+    const reminder: any = {
+      ...data,
+      id: data.id || randomUUID(),
+      ownerId: data.ownerId || data.userId || 'opendots-owner',
+      title: data.title,
+      message: data.message || undefined,
+      scheduledAt: scheduled,
+      dueAt: scheduled,
+      originalScheduledAt: data.originalScheduledAt !== undefined ? data.originalScheduledAt : scheduled,
+      timezone: data.timezone || 'Asia/Kolkata',
+      recurrence: data.recurrence || 'none',
+      recurrenceRule: data.recurrenceRule || undefined,
+      status: data.status || (data.targetEvent && !scheduled ? 'event_monitoring' : 'pending'),
+      isEventMonitoring: Boolean(data.isEventMonitoring || data.targetEvent),
+      eventQuery: data.eventQuery || data.targetEvent || undefined,
+      targetEvent: data.eventQuery || data.targetEvent || undefined,
+      eventSource: data.eventSource || undefined,
+      eventTargetTimeStr: data.eventTargetTimeStr || undefined,
+      deliveryChannels: data.deliveryChannels || ['push', 'in_app', 'speech'],
+      triggerCount: 0,
+      snoozeCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.db
+      .prepare(
+        `INSERT INTO reminders (
+          id, ownerId, title, message, scheduledAt, originalScheduledAt, timezone,
+          recurrence, recurrenceRule, status, isEventMonitoring, eventQuery,
+          eventSource, eventTargetTimeStr, deliveryChannelsJson, lastTriggeredAt,
+          triggerCount, snoozeCount, snoozedUntil, completedAt, cancelledAt,
+          failureReason, createdAt, updatedAt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        reminder.id,
+        reminder.ownerId,
+        reminder.title,
+        reminder.message ?? null,
+        reminder.scheduledAt ?? null,
+        reminder.originalScheduledAt ?? null,
+        reminder.timezone,
+        typeof reminder.recurrence === 'string' ? reminder.recurrence : (reminder.recurrence?.type || 'none'),
+        reminder.recurrenceRule ?? (typeof reminder.recurrence === 'object' ? reminder.recurrence?.timeOfDay : null) ?? null,
+        reminder.status,
+        reminder.isEventMonitoring ? 1 : 0,
+        reminder.eventQuery ?? null,
+        reminder.eventSource ?? null,
+        reminder.eventTargetTimeStr ?? null,
+        JSON.stringify(reminder.deliveryChannels),
+        reminder.lastTriggeredAt ?? null,
+        reminder.triggerCount,
+        reminder.snoozeCount,
+        reminder.snoozedUntil ?? null,
+        reminder.completedAt ?? null,
+        reminder.cancelledAt ?? null,
+        reminder.failureReason ?? null,
+        reminder.createdAt,
+        reminder.updatedAt,
+      );
+
+    return reminder;
+  }
+
+  updateReminder(
+    id: string,
+    updates: any,
+    ownerId = 'opendots-owner',
+  ): Reminder | undefined {
+    const existing = this.getReminder(id, ownerId);
+    if (!existing) return undefined;
+
+    const scheduledAt = updates.scheduledAt !== undefined ? updates.scheduledAt : (updates.dueAt !== undefined ? updates.dueAt : existing.scheduledAt);
+    const updated: any = {
+      ...existing,
+      ...updates,
+      scheduledAt,
+      dueAt: scheduledAt,
+      completedAt: updates.status === 'completed' ? Date.now() : existing.completedAt,
+      cancelledAt: updates.status === 'cancelled' ? Date.now() : existing.cancelledAt,
+      updatedAt: Date.now(),
+    };
+
+    this.db
+      .prepare(
+        `UPDATE reminders SET
+          title = ?, message = ?, scheduledAt = ?, originalScheduledAt = ?,
+          timezone = ?, recurrence = ?, recurrenceRule = ?, status = ?,
+          isEventMonitoring = ?, eventQuery = ?, eventSource = ?,
+          eventTargetTimeStr = ?, deliveryChannelsJson = ?, lastTriggeredAt = ?,
+          triggerCount = ?, snoozeCount = ?, snoozedUntil = ?, completedAt = ?,
+          cancelledAt = ?, failureReason = ?, updatedAt = ?
+         WHERE id = ?`,
+      )
+      .run(
+        updated.title,
+        updated.message ?? null,
+        updated.scheduledAt ?? null,
+        updated.originalScheduledAt ?? null,
+        updated.timezone,
+        typeof updated.recurrence === 'string' ? updated.recurrence : (updated.recurrence?.type || 'none'),
+        updated.recurrenceRule ?? null,
+        updated.status,
+        updated.isEventMonitoring ? 1 : 0,
+        updated.eventQuery ?? null,
+        updated.eventSource ?? null,
+        updated.eventTargetTimeStr ?? null,
+        JSON.stringify(updated.deliveryChannels),
+        updated.lastTriggeredAt ?? null,
+        updated.triggerCount,
+        updated.snoozeCount,
+        updated.snoozedUntil ?? null,
+        updated.completedAt ?? null,
+        updated.cancelledAt ?? null,
+        updated.failureReason ?? null,
+        updated.updatedAt,
+        id,
+      );
+
+    return updated;
+  }
+
+  snoozeReminder(id: string, minutes = 15, ownerId = 'opendots-owner'): Reminder | undefined {
+    const reminder = this.getReminder(id, ownerId);
+    if (!reminder) return undefined;
+
+    const base = Math.max(Date.now(), reminder.scheduledAt || Date.now());
+    const snoozedUntil = base + minutes * 60 * 1000;
+    return this.updateReminder(
+      id,
+      {
+        scheduledAt: snoozedUntil,
+        snoozedUntil,
+        status: 'snoozed',
+        snoozeCount: (reminder.snoozeCount || 0) + 1,
+      },
+      ownerId,
+    );
+  }
+
+  markReminderTriggered(
+    id: string,
+    nextScheduledAt?: number,
+    ownerId = 'opendots-owner',
+  ): Reminder | undefined {
+    const reminder = this.getReminder(id, ownerId);
+    if (!reminder) return undefined;
+
+    const now = Date.now();
+    if (nextScheduledAt && reminder.recurrence !== 'none') {
+      return this.updateReminder(
+        id,
+        {
+          scheduledAt: nextScheduledAt,
+          lastTriggeredAt: now,
+          triggerCount: reminder.triggerCount + 1,
+          status: 'scheduled',
+        },
+        ownerId,
+      );
+    }
+
+    return this.updateReminder(
+      id,
+      {
+        lastTriggeredAt: now,
+        triggerCount: reminder.triggerCount + 1,
+        status: 'triggered',
+      },
+      ownerId,
+    );
+  }
+
+  deleteReminder(id: string, ownerId?: string): boolean {
+    let query = 'DELETE FROM reminders WHERE id = ?';
+    const params: any[] = [id];
+    if (ownerId && ownerId !== 'opendots-owner') {
+      query += ' AND ownerId = ?';
+      params.push(ownerId);
+    }
+    const res = this.db.prepare(query).run(...params);
+    return Boolean(res.changes);
+  }
+
+  private rowToReminder(r: any): Reminder {
+    let channels: ('push' | 'in_app' | 'speech')[] = ['push', 'in_app', 'speech'];
+    try {
+      if (r.deliveryChannelsJson) {
+        channels = JSON.parse(r.deliveryChannelsJson);
+      }
+    } catch {}
+
+    const sched = r.scheduledAt !== null && r.scheduledAt !== undefined ? Number(r.scheduledAt) : null;
+    const orig = r.originalScheduledAt !== null && r.originalScheduledAt !== undefined ? Number(r.originalScheduledAt) : null;
+
+    const reminder: any = {
+      id: r.id,
+      ownerId: r.ownerId,
+      userId: r.ownerId,
+      title: r.title,
+      message: r.message || undefined,
+      scheduledAt: sched,
+      dueAt: sched,
+      originalScheduledAt: orig,
+      timezone: r.timezone || 'Asia/Kolkata',
+      recurrence: (r.recurrence as ReminderRecurrence) || 'none',
+      recurrenceRule: r.recurrenceRule || undefined,
+      status: (r.status as ReminderStatus) || 'pending',
+      isEventMonitoring: Boolean(r.isEventMonitoring),
+      eventQuery: r.eventQuery || undefined,
+      targetEvent: r.eventQuery || undefined,
+      eventSource: r.eventSource || undefined,
+      eventTargetTimeStr: r.eventTargetTimeStr || undefined,
+      deliveryChannels: channels,
+      lastTriggeredAt: r.lastTriggeredAt ? Number(r.lastTriggeredAt) : undefined,
+      triggerCount: Number(r.triggerCount || 0),
+      snoozeCount: Number(r.snoozeCount || 0),
+      snoozedUntil: r.snoozedUntil ? Number(r.snoozedUntil) : undefined,
+      completedAt: r.completedAt ? Number(r.completedAt) : undefined,
+      cancelledAt: r.cancelledAt ? Number(r.cancelledAt) : undefined,
+      failureReason: r.failureReason || undefined,
+      createdAt: Number(r.createdAt),
+      updatedAt: Number(r.updatedAt),
+    };
+    return reminder;
+  }
+
+  // Push Subscriptions
+  pushSubscriptions(ownerId?: string): WebPushSubscription[] {
+    try {
+      let query = 'SELECT * FROM push_subscriptions';
+      const params: any[] = [];
+      if (ownerId && ownerId !== 'opendots-owner') {
+        query += ' WHERE ownerId = ?';
+        params.push(ownerId);
+      }
+      const rows = this.db.prepare(query).all(...params) as any[];
+      return rows.map((r) => ({
+        id: r.id,
+        ownerId: r.ownerId,
+        endpoint: r.endpoint,
+        keys: { p256dh: r.p256dh, auth: r.auth },
+        userAgent: r.userAgent || undefined,
+        createdAt: Number(r.createdAt),
+        lastUsedAt: r.lastUsedAt ? Number(r.lastUsedAt) : undefined,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  savePushSubscription(
+    sub: Omit<WebPushSubscription, 'id' | 'createdAt'> & { id?: string; ownerId?: string; userId?: string },
+  ): WebPushSubscription {
+    const id = sub.id || randomUUID();
+    const now = Date.now();
+    const ownerId = sub.ownerId || sub.userId || 'opendots-owner';
+    this.db
+      .prepare(
+        `INSERT INTO push_subscriptions (id, ownerId, endpoint, p256dh, auth, userAgent, createdAt, lastUsedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(endpoint) DO UPDATE SET
+           p256dh = excluded.p256dh,
+           auth = excluded.auth,
+           userAgent = excluded.userAgent,
+           lastUsedAt = ?`,
+      )
+      .run(
+        id,
+        ownerId,
+        sub.endpoint,
+        sub.keys.p256dh,
+        sub.keys.auth,
+        sub.userAgent || null,
+        now,
+        now,
+        now,
+      );
+
+    return {
+      id,
+      ownerId,
+      userId: ownerId,
+      endpoint: sub.endpoint,
+      keys: sub.keys,
+      userAgent: sub.userAgent,
+      createdAt: now,
+      lastUsedAt: now,
+    };
+  }
+
+  deletePushSubscription(endpoint: string, ownerId?: string): boolean {
+    let query = 'DELETE FROM push_subscriptions WHERE endpoint = ?';
+    const params: any[] = [endpoint];
+    if (ownerId && ownerId !== 'opendots-owner') {
+      query += ' AND ownerId = ?';
+      params.push(ownerId);
+    }
+    const res = this.db.prepare(query).run(...params);
+    return Boolean(res.changes);
   }
 }

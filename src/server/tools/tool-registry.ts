@@ -51,6 +51,12 @@ import {
   veniceVideoTool,
   veniceResearchTool,
 } from '../venice/venice-tools.js';
+import {
+  createReminderTool,
+  listRemindersTool,
+  cancelReminderTool,
+  snoozeReminderTool,
+} from '../reminders/index.js';
 
 export class ToolRegistry {
   private tools = new Map<string, OpenDotsToolDefinition<any, any>>();
@@ -151,3 +157,7 @@ globalToolRegistry.register(veniceWebsiteBridgeTool);
 globalToolRegistry.register(veniceImageTool);
 globalToolRegistry.register(veniceVideoTool);
 globalToolRegistry.register(veniceResearchTool);
+globalToolRegistry.register(createReminderTool);
+globalToolRegistry.register(listRemindersTool);
+globalToolRegistry.register(cancelReminderTool);
+globalToolRegistry.register(snoozeReminderTool);

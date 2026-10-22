@@ -68,6 +68,8 @@ import { NotificationCenter } from './NotificationCenter';
 import { SetupAssistantModal } from './SetupAssistantModal';
 import { McpDirectoryModal } from './McpDirectoryModal';
 import { CoworkProjectWorkspace } from './CoworkProjectWorkspace';
+import { RemindersDashboard } from './RemindersDashboard';
+import { playReminderChime, speakReminderAnnouncement } from './reminders-service';
 
 function describeFailure(error: unknown, fallback: string) {
   return {
@@ -83,8 +85,9 @@ export function App() {
   const [selectedDot, setSelectedDot] = useState('');
   const [selectedThread, setSelectedThread] = useState<string>();
   const [view, rawSetView] = useState<
-    'chat' | 'tasks' | 'goals' | 'approvals' | 'connectors' | 'memories' | 'space' | 'activity' | 'cowork'
+    'chat' | 'tasks' | 'goals' | 'approvals' | 'connectors' | 'memories' | 'space' | 'activity' | 'cowork' | 'reminders'
   >('chat');
+  const announcedReminders = useRef<Set<string>>(new Set());
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
   const [skillModalOpen, setSkillModalOpen] = useState(false);
   const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
@@ -109,6 +112,11 @@ export function App() {
   useEffect(() => {
     let acceptedHash = location.hash;
     const navigate = () => {
+      if (location.hash === '#reminders') {
+        rawSetView('reminders');
+        setMobile(false);
+        return;
+      }
       const match = location.hash.match(
         /^#\/spaces\/([^/]+)(?:\/pages\/([^/]+))?$/,
       );
@@ -160,8 +168,22 @@ export function App() {
   const [taskDetail, setTaskDetail] = useState<Detail>();
   const refreshUnreadCount = useCallback(async () => {
     try {
-      const res = await api<{ unreadCount: number }>('/notifications/unread-count');
-      setUnreadNotifications(res.unreadCount);
+      const res = await api<{ count: number }>('/notifications/unread-count');
+      const count = res.count ?? 0;
+      setUnreadNotifications(count);
+
+      // Check for unannounced reminders
+      if (count > 0) {
+        const notifs = await api<Array<{ id: string; type: string; title: string; message: string; metadata?: any }>>('/notifications?unreadOnly=true&limit=10');
+        for (const notif of notifs) {
+          if (notif.type === 'reminder' && !announcedReminders.current.has(notif.id)) {
+            announcedReminders.current.add(notif.id);
+            playReminderChime();
+            const subject = notif.metadata?.title || notif.message.replace(/^Reminder, sir\. Your task is to /i, '').replace(/\.$/, '');
+            speakReminderAnnouncement(subject);
+          }
+        }
+      }
     } catch {
       // ignore
     }
@@ -559,6 +581,16 @@ export function App() {
             <span>Activity Center</span>
           </button>
           <button
+            className={`nav-item ${view === 'reminders' ? 'active' : ''}`}
+            onClick={() => {
+              setView('reminders');
+              setMobile(false);
+            }}
+          >
+            <Bell size={17} />
+            <span>Smart Reminders</span>
+          </button>
+          <button
             className={`nav-item ${view === 'tasks' ? 'active' : ''}`}
             onClick={() => {
               setView('tasks');
@@ -653,11 +685,15 @@ export function App() {
             <strong>
               {view === 'chat'
                 ? dot.name
-                : view === 'tasks'
-                  ? 'Activity'
-                  : view === 'space'
-                    ? 'Pages'
-                    : 'Memories'}
+                : view === 'reminders'
+                  ? 'Smart Reminders'
+                  : view === 'cowork'
+                    ? 'Cowork Projects'
+                    : view === 'tasks'
+                      ? 'Activity'
+                      : view === 'space'
+                        ? 'Pages'
+                        : 'Memories'}
             </strong>
           </div>
           <div className="top-actions">
@@ -918,6 +954,8 @@ export function App() {
                 <h1>
                   {view === 'cowork'
                     ? 'Cowork Projects'
+                    : view === 'reminders'
+                    ? 'Smart Reminders'
                     : view === 'memories'
                     ? 'Memories'
                     : view === 'goals'
@@ -931,6 +969,8 @@ export function App() {
                 <p>
                   {view === 'cowork'
                     ? 'Multi-file project workspaces, office document generation, and 12 autonomous Cowork workflows.'
+                    : view === 'reminders'
+                    ? 'Natural language persistent reminders with Web Push notifications and spoken voice alerts.'
                     : view === 'memories'
                     ? 'Preferences you choose to share with your Dots.'
                     : view === 'goals'
@@ -973,6 +1013,8 @@ export function App() {
                   void refresh();
                 }}
               />
+            ) : view === 'reminders' ? (
+              <RemindersDashboard />
             ) : view === 'activity' ? (
               <ActivityCenter />
             ) : view === 'goals' ? (

@@ -51,6 +51,12 @@ import {
   type ImageStyle,
 } from './image-config.js';
 import { globalVeniceBridge } from './venice/venice-website-bridge.js';
+import {
+  ReminderService,
+  initializeReminderTools,
+  parseNaturalLanguageReminder,
+} from './reminders/index.js';
+import type { ReminderRecurrence, ReminderStatus } from '../shared/types.js';
 const interval = z.number().int().min(60).max(31_536_000).nullable();
 export interface AppOptions {
   store: Store;
@@ -71,6 +77,9 @@ export function createApp({
   const app = new Hono();
   const taskPlanner = new TaskPlanner(store);
   const proactiveService = new ProactiveResearchService(store);
+  initializeReminderTools(store);
+  const reminderService = new ReminderService(store);
+  reminderService.start();
   app.use(
     '/api/*',
     bodyLimit({
@@ -1854,6 +1863,223 @@ export function createApp({
 
     const evaluation = store.evaluateTaskCondition(task, currentValue);
     return c.json(evaluation);
+  });
+
+  // -------------------------------------------------------------
+  // SMART REMINDERS SYSTEM (Website-Only Smart Reminders)
+  // -------------------------------------------------------------
+
+  app.get('/api/reminders', async (c) => {
+    const status = c.req.query('status') as ReminderStatus | undefined;
+    const reminders = store.reminders({ status });
+    return c.json({ reminders });
+  });
+
+  app.post('/api/reminders', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const { prompt, title, dueAt, recurrence, targetEvent, timezone } = body;
+    const tz = timezone || 'Asia/Kolkata';
+
+    // Natural-language parsing if prompt is given without explicit dueAt
+    if (prompt && !dueAt) {
+      const parsed = parseNaturalLanguageReminder(prompt, tz);
+      if (parsed.intent === 'cancel') {
+        const found = store.reminders({ status: 'pending' }).filter((r) =>
+          r.title.toLowerCase().includes(parsed.title.toLowerCase()),
+        );
+        for (const rem of found) {
+          store.updateReminder(rem.id, { status: 'cancelled' });
+        }
+        return c.json({
+          action: 'cancelled',
+          cancelledCount: found.length,
+          message: `Cancelled ${found.length} reminder(s) matching "${parsed.title}".`,
+        });
+      }
+
+      if (parsed.isEventMonitoring) {
+        const reminder = store.createReminder({
+          userId: 'user',
+          title: parsed.title,
+          dueAt: null,
+          targetEvent: parsed.targetEvent || parsed.title,
+          status: 'event_monitoring',
+          timezone: tz,
+        });
+        return c.json(
+          {
+            reminder,
+            message: `Event monitoring active: "${parsed.title}". OpenDots will monitor reliable web sources and notify you on the release/occurrence day.`,
+          },
+          201,
+        );
+      }
+
+      if (!parsed.dueAt) {
+        return c.json(
+          {
+            error: 'Clarification needed',
+            clarificationNeeded: true,
+            clarificationPrompt:
+              parsed.clarificationQuestion ||
+              'Please specify when you would like to be reminded (e.g., "tomorrow at 7 AM" or "in 30 minutes").',
+          },
+          400,
+        );
+      }
+
+      const reminder = store.createReminder({
+        userId: 'user',
+        title: parsed.title,
+        dueAt: parsed.dueAt,
+        recurrence: parsed.recurrence,
+        timezone: tz,
+      });
+
+      return c.json(
+        {
+          reminder,
+          formattedDue: parsed.formattedDue,
+          message: `Reminder scheduled for ${parsed.formattedDue}: "${parsed.title}"`,
+        },
+        201,
+      );
+    }
+
+    // Direct structured reminder creation
+    if (!title) {
+      return c.json({ error: 'title or prompt is required.' }, 400);
+    }
+
+    let parsedDueAt: number | undefined = undefined;
+    if (dueAt) {
+      const ts = typeof dueAt === 'string' ? new Date(dueAt).getTime() : Number(dueAt);
+      if (!isNaN(ts)) parsedDueAt = ts;
+    }
+
+    const reminder = store.createReminder({
+      userId: body.userId || 'user',
+      title,
+      dueAt: parsedDueAt,
+      recurrence: recurrence || null,
+      targetEvent: targetEvent || null,
+      status: targetEvent && !parsedDueAt ? 'event_monitoring' : 'pending',
+      timezone: tz,
+    });
+
+    return c.json({ reminder }, 201);
+  });
+
+  app.post('/api/reminders/parse', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.prompt) {
+      return c.json({ error: 'prompt is required.' }, 400);
+    }
+    const tz = body.timezone || 'Asia/Kolkata';
+    const parsed = parseNaturalLanguageReminder(body.prompt, tz);
+    return c.json({ parsed });
+  });
+
+  app.get('/api/reminders/:id', async (c) => {
+    const id = c.req.param('id');
+    const reminder = store.getReminder(id);
+    if (!reminder) return c.json({ error: 'Reminder not found.' }, 404);
+    return c.json({ reminder });
+  });
+
+  app.put('/api/reminders/:id', async (c) => {
+    const id = c.req.param('id');
+    const reminder = store.getReminder(id);
+    if (!reminder) return c.json({ error: 'Reminder not found.' }, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const updated = store.updateReminder(id, body);
+    return c.json({ reminder: updated });
+  });
+
+  app.delete('/api/reminders/:id', async (c) => {
+    const id = c.req.param('id');
+    const success = store.deleteReminder(id);
+    if (!success) return c.json({ error: 'Reminder not found.' }, 404);
+    return c.json({ success: true });
+  });
+
+  app.post('/api/reminders/:id/snooze', async (c) => {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const minutes = Number(body.minutes) || 10;
+    const snoozed = store.snoozeReminder(id, minutes);
+    if (!snoozed) return c.json({ error: 'Reminder not found.' }, 404);
+    return c.json({ reminder: snoozed, snoozedMinutes: minutes });
+  });
+
+  app.post('/api/reminders/:id/complete', async (c) => {
+    const id = c.req.param('id');
+    const updated = store.updateReminder(id, { status: 'completed' });
+    if (!updated) return c.json({ error: 'Reminder not found.' }, 404);
+    return c.json({ reminder: updated });
+  });
+
+  // VAPID & Push Notification endpoints
+  app.get('/api/reminders/vapid-public-key', async (c) => {
+    const publicKey = reminderService.getPushService().getPublicKey();
+    return c.json({ publicKey });
+  });
+
+  app.post('/api/reminders/subscribe', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.endpoint || !body.keys?.auth || !body.keys?.p256dh) {
+      return c.json({ error: 'Invalid subscription object.' }, 400);
+    }
+    const sub = store.savePushSubscription({
+      ownerId: body.userId || body.ownerId || 'opendots-owner',
+      userId: body.userId || body.ownerId || 'opendots-owner',
+      endpoint: body.endpoint,
+      keys: {
+        auth: body.keys.auth,
+        p256dh: body.keys.p256dh,
+      },
+      userAgent: c.req.header('user-agent'),
+    });
+    return c.json({ subscription: sub }, 201);
+  });
+
+  app.post('/api/reminders/unsubscribe', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.endpoint) {
+      return c.json({ error: 'endpoint is required.' }, 400);
+    }
+    const success = store.deletePushSubscription(body.endpoint);
+    return c.json({ success });
+  });
+
+  app.post('/api/reminders/test', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const message = body.message || 'Reminder, sir. Your task is to test OpenDots smart notifications.';
+    const subs = store.pushSubscriptions();
+    const result = await reminderService.getPushService().sendToAll(
+      subs,
+      {
+        title: 'OpenDots Reminder',
+        body: message,
+        tag: 'opendots-test',
+        icon: '/favicon.svg',
+        badge: '/favicon.svg',
+        data: { url: '/', test: true },
+      },
+      (expiredEndpoint) => store.deletePushSubscription(expiredEndpoint),
+    );
+    return c.json({ success: true, pushResult: result });
+  });
+
+  app.get('/api/reminders/tick', async (c) => {
+    // Allows external keepalive cron / UptimeRobot to trigger due checks
+    const count = await reminderService.triggerDueReminders();
+    return c.json({
+      success: true,
+      triggeredCount: count,
+      now: Date.now(),
+      istTime: new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }),
+    });
   });
 
   app.onError((error, c) => {
