@@ -134,9 +134,13 @@ export function Chat({
       return () => window.removeEventListener('opendots:open-image-studio', handleOpenStudio);
     }
   }, []);
+  const onVoiceInterrupt = useCallback(() => {
+    setRunning(false);
+  }, []);
+
   const onVoiceTurn = useCallback(
     async (text: string): Promise<string> => {
-      if (!text.trim() || running || !loaded || !contextReady || paused)
+      if (!text.trim() || !loaded || !contextReady || paused)
         return '';
       setError('');
       setRunError('');
@@ -172,7 +176,6 @@ export function Chat({
       onSaved,
       pageContext,
       paused,
-      running,
     ],
   );
 
@@ -181,6 +184,7 @@ export function Chat({
     onSaved,
     agent.messages.at(-1)?.id,
     onVoiceTurn,
+    onVoiceInterrupt,
   );
 
   const dictation = useDictation({

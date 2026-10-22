@@ -3899,6 +3899,97 @@ h3 {
   overflow-y: auto;
   min-height: 80px;
 }
+.call-action-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 10px 0 16px;
+  width: 100%;
+}
+.call-interrupt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 22px;
+  border-radius: 9999px;
+  background: #e64949;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(230, 73, 73, 0.4);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.call-interrupt-btn:hover {
+  background: #d43434;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 22px rgba(230, 73, 73, 0.5);
+}
+.call-interrupt-btn:active {
+  transform: translateY(1px);
+}
+.call-interrupt-btn.thinking {
+  background: #f08c00;
+  box-shadow: 0 4px 18px rgba(240, 140, 0, 0.4);
+}
+.call-interrupt-btn.thinking:hover {
+  background: #e07b00;
+}
+.call-interrupt-btn .interrupt-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.call-interrupt-btn .interrupt-label {
+  letter-spacing: 0.01em;
+}
+.call-interrupt-btn .interrupt-sublabel {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.88;
+  padding-left: 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.35);
+}
+.call-listening-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 13px;
+  color: #abf1d5;
+}
+.listening-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #abf1d5;
+  box-shadow: 0 0 0 0 rgba(171, 241, 213, 0.7);
+  animation: listening-pulse-anim 1.5s infinite;
+}
+@keyframes listening-pulse-anim {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(171, 241, 213, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 7px rgba(171, 241, 213, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(171, 241, 213, 0);
+  }
+}
+.call-controls .call-interrupt-ctrl > span {
+  background: #e64949;
+  border-color: #e64949;
+}
+.call-controls .call-interrupt-ctrl:hover:not(:disabled) > span {
+  background: #d43434;
+}
 .call-controls {
   display: flex;
   gap: 28px;

@@ -5,6 +5,57 @@ import { getSpeechRecognition, speakWithGemini, speakText } from './speech';
 // A single failed control poll is usually a network flap, not a dead call.
 const CONTROL_POLL_FAILURE_LIMIT = 3;
 
+const AUDIO_CONSTRAINTS: MediaStreamConstraints = {
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  },
+};
+
+export function isStopCommand(text: string): boolean {
+  if (!text) return false;
+  const normalized = text.trim().toLowerCase().replace(/[.,!?;:]/g, '');
+  const stopPhrases = [
+    'stop',
+    'wait',
+    'hold on',
+    'pause',
+    'quiet',
+    'never mind',
+    'nevermind',
+    'cancel',
+    'stop speaking',
+    'stop talking',
+    'be quiet',
+    'shut up',
+    'hush',
+    'silence',
+    'shh',
+    'hold up',
+    'stop it',
+    'wait a minute',
+    'wait a second',
+    'hang on',
+  ];
+  return stopPhrases.includes(normalized);
+}
+
+export function isEchoOfCaption(transcript: string, caption: string): boolean {
+  if (!transcript || !caption) return false;
+  const t = transcript.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  const c = caption.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  if (!t || !c) return false;
+  if (isStopCommand(transcript)) {
+    return false;
+  }
+  const tWords = t.split(/\s+/);
+  if (tWords.length >= 2 && c.includes(t)) {
+    return true;
+  }
+  return false;
+}
+
 type VoiceSession =
   | {
       mode: 'webrtc';
@@ -27,6 +78,7 @@ type VoiceSession =
       cancelled: boolean;
       stopAudio?: () => void;
       timer?: ReturnType<typeof setTimeout>;
+      restartListening?: () => void;
     };
 
 export function useVoice(
@@ -34,6 +86,7 @@ export function useVoice(
   onSaved: () => void,
   anchorMessageId?: string,
   onTurn?: (request: string) => Promise<string>,
+  onInterrupt?: () => void,
 ) {
   const [status, setStatus] = useState<
     'idle' | 'connecting' | 'active' | 'ending'
@@ -54,7 +107,21 @@ export function useVoice(
   const anchor = useRef(anchorMessageId);
   anchor.current = anchorMessageId;
 
+  const turnEpoch = useRef(0);
+  const phaseRef = useRef<'listening' | 'speaking' | 'thinking'>('listening');
+  const activeCaptionRef = useRef('');
+  activeCaptionRef.current = caption;
+
+  const updatePhase = useCallback(
+    (next: 'listening' | 'speaking' | 'thinking') => {
+      phaseRef.current = next;
+      setPhase(next);
+    },
+    [],
+  );
+
   const closeMedia = useCallback(() => {
+    turnEpoch.current++;
     const current = session.current;
     if (!current) return;
     current.cancelled = true;
@@ -76,8 +143,11 @@ export function useVoice(
         current.recognition?.abort();
       } catch {}
       current.stopAudio?.();
+      current.stopAudio = undefined;
       if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
+        try {
+          window.speechSynthesis.cancel();
+        } catch {}
       }
       clearTimeout(current.timer);
     }
@@ -86,6 +156,7 @@ export function useVoice(
   const end = useCallback(async () => {
     if (ending.current) return;
     generation.current++;
+    turnEpoch.current++;
     connecting.current = false;
     const current = session.current;
     if (!current) {
@@ -105,8 +176,11 @@ export function useVoice(
         current.recognition?.abort();
       } catch {}
       current.stopAudio?.();
+      current.stopAudio = undefined;
       if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
+        try {
+          window.speechSynthesis.cancel();
+        } catch {}
       }
       clearTimeout(current.timer);
     }
@@ -133,6 +207,59 @@ export function useVoice(
       setStatus('idle');
     }
   }, [closeMedia, onSaved]);
+
+  const interrupt = useCallback(
+    (reason: 'button' | 'barge-in' | 'command' = 'button') => {
+      turnEpoch.current++;
+      const current = session.current;
+      if (!current || current.cancelled) return;
+
+      if (current.mode === 'browser') {
+        current.stopAudio?.();
+        current.stopAudio = undefined;
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+          try {
+            window.speechSynthesis.cancel();
+          } catch {}
+        }
+        if (current.recognition) {
+          current.recognition.abortedByVoice = true;
+          try {
+            current.recognition.abort();
+          } catch {}
+          current.recognition = undefined;
+        }
+      } else if (current.mode === 'webrtc') {
+        try {
+          current.audio.pause();
+          current.audio.currentTime = 0;
+        } catch {}
+        if (current.channel && current.channel.readyState === 'open') {
+          try {
+            current.channel.send(JSON.stringify({ type: 'response.cancel' }));
+          } catch {}
+        }
+      }
+
+      onInterrupt?.();
+      updatePhase('listening');
+
+      if (reason === 'button') {
+        setCaption('Interrupted. Listening to you…');
+        setUserCaption('');
+      } else if (reason === 'command') {
+        setCaption('Stopped. I’m listening to you…');
+        setUserCaption('');
+      } else if (reason === 'barge-in') {
+        setCaption('Listening to you…');
+      }
+
+      if (current.mode === 'browser' && !muted) {
+        current.restartListening?.();
+      }
+    },
+    [muted, onInterrupt, updatePhase],
+  );
 
   useEffect(
     () => () => {
@@ -197,7 +324,7 @@ export function useVoice(
 
     let stream: MediaStream | undefined;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia(AUDIO_CONSTRAINTS);
     } catch {
       setError('Microphone permission was denied. Please allow microphone access.');
       setStatus('idle');
@@ -220,25 +347,40 @@ export function useVoice(
 
     setStatus('active');
     setStartedAt(Date.now());
-    setPhase('listening');
+    updatePhase('listening');
     setError('');
     setCaption('Speak naturally. Your Dot is listening…');
+    activeCaptionRef.current = '';
     setUserCaption('');
 
     current.timer = setTimeout(() => void end(), 15 * 60_000);
 
     const listenLoop = () => {
       if (current.cancelled || session.current !== current) return;
-      const recognition = new SpeechRecognition();
+      if (muted) return;
+
+      const SpeechRecognitionClass = getSpeechRecognition();
+      if (!SpeechRecognitionClass) return;
+
+      if (current.recognition) {
+        current.recognition.abortedByVoice = true;
+        try {
+          current.recognition.abort();
+        } catch {}
+        current.recognition = undefined;
+      }
+
+      const recognition = new SpeechRecognitionClass();
       recognition.continuous = false;
       recognition.interimResults = true;
       recognition.lang = navigator.language || 'en-US';
       current.recognition = recognition;
 
       let finalCaptured = '';
+      let interimCaptured = '';
 
       recognition.onresult = (event: any) => {
-        if (current.cancelled) return;
+        if (current.cancelled || session.current !== current || recognition.abortedByVoice) return;
         let interim = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const res = event.results[i];
@@ -248,15 +390,34 @@ export function useVoice(
             interim += res[0].transcript;
           }
         }
-        setUserCaption(finalCaptured || interim);
+        interimCaptured = interim;
+        const currentSpoken = (finalCaptured || interim).trim();
+
+        // Real-time barge-in detection while Dot is speaking or thinking
+        if (phaseRef.current === 'speaking' || phaseRef.current === 'thinking') {
+          if (currentSpoken && !isEchoOfCaption(currentSpoken, activeCaptionRef.current)) {
+            if (isStopCommand(currentSpoken)) {
+              interrupt('command');
+            } else {
+              // Instantly halt audio and switch to listening
+              interrupt('barge-in');
+              setUserCaption(currentSpoken);
+            }
+            return;
+          }
+        }
+
+        setUserCaption(currentSpoken);
       };
 
       recognition.onerror = (event: any) => {
-        if (current.cancelled || session.current !== current) return;
+        if (current.cancelled || session.current !== current || recognition.abortedByVoice) return;
         if (event.error === 'no-speech') {
           setTimeout(() => {
-            if (!current.cancelled && session.current === current) listenLoop();
-          }, 300);
+            if (!current.cancelled && session.current === current && !muted) {
+              listenLoop();
+            }
+          }, 200);
           return;
         }
         if (event.error === 'not-allowed') {
@@ -264,48 +425,140 @@ export function useVoice(
           void end();
           return;
         }
+        // If aborted or transient error, retry unless cancelled
+        setTimeout(() => {
+          if (
+            !current.cancelled &&
+            session.current === current &&
+            !muted &&
+            phaseRef.current !== 'speaking'
+          ) {
+            listenLoop();
+          }
+        }, 500);
       };
 
       recognition.onend = async () => {
-        if (current.cancelled || session.current !== current) return;
-        const query = finalCaptured.trim();
+        if (
+          current.cancelled ||
+          session.current !== current ||
+          recognition.abortedByVoice ||
+          current.recognition !== recognition
+        ) {
+          return;
+        }
+
+        // If Dot is still speaking, keep recognition active to catch future barge-in
+        if (phaseRef.current === 'speaking') {
+          setTimeout(() => {
+            if (
+              !current.cancelled &&
+              session.current === current &&
+              phaseRef.current === 'speaking' &&
+              !muted
+            ) {
+              listenLoop();
+            }
+          }, 150);
+          return;
+        }
+
+        const query = (finalCaptured || interimCaptured).trim();
+        finalCaptured = '';
+        interimCaptured = '';
         if (!query) {
           listenLoop();
           return;
         }
 
+        // Conversational interjection check: "stop", "wait", "hold on", "cancel"
+        if (isStopCommand(query)) {
+          interrupt('command');
+          setTimeout(() => {
+            if (!current.cancelled && session.current === current && !muted) {
+              listenLoop();
+            }
+          }, 300);
+          return;
+        }
+
+        // Genuine turn
+        const thisTurnEpoch = ++turnEpoch.current;
         current.transcript.push(`User: ${query}`);
-        setPhase('thinking');
+        updatePhase('thinking');
+
+        // Keep recognition ready while thinking so user can cancel or barge-in
+        setTimeout(() => {
+          if (
+            !current.cancelled &&
+            session.current === current &&
+            phaseRef.current === 'thinking' &&
+            !muted
+          ) {
+            listenLoop();
+          }
+        }, 100);
 
         try {
           if (!onTurn) throw new Error('Turn handler unavailable.');
           const reply = await onTurn(query);
-          if (current.cancelled || session.current !== current) return;
+          if (
+            current.cancelled ||
+            session.current !== current ||
+            turnEpoch.current !== thisTurnEpoch
+          ) {
+            return;
+          }
 
           current.transcript.push(`Dot: ${reply}`);
           setCaption(reply);
-          setPhase('speaking');
+          activeCaptionRef.current = reply;
+          updatePhase('speaking');
+
+          // Keep recognition active during speaking for real-time barge-in
+          setTimeout(() => {
+            if (
+              !current.cancelled &&
+              session.current === current &&
+              phaseRef.current === 'speaking' &&
+              !muted
+            ) {
+              listenLoop();
+            }
+          }, 100);
 
           const speech = await speakWithGemini(
             reply,
             () => {
-              if (!current.cancelled) setPhase('speaking');
+              if (!current.cancelled && turnEpoch.current === thisTurnEpoch) {
+                updatePhase('speaking');
+              }
             },
             () => {
-              if (!current.cancelled && session.current === current) {
-                setPhase('listening');
+              if (
+                !current.cancelled &&
+                session.current === current &&
+                turnEpoch.current === thisTurnEpoch
+              ) {
+                updatePhase('listening');
                 setUserCaption('');
+                setCaption('Speak naturally. Your Dot is listening…');
+                activeCaptionRef.current = '';
                 listenLoop();
               }
             },
           );
           current.stopAudio = speech.cancel;
         } catch (err) {
-          if (current.cancelled) return;
-          setError(err instanceof Error ? err.message : 'Error processing speech.');
-          setPhase('listening');
+          if (current.cancelled || turnEpoch.current !== thisTurnEpoch) return;
+          setError(
+            err instanceof Error ? err.message : 'Error processing speech.',
+          );
+          updatePhase('listening');
           setTimeout(() => {
-            if (!current.cancelled && session.current === current) listenLoop();
+            if (!current.cancelled && session.current === current && !muted) {
+              listenLoop();
+            }
           }, 1500);
         }
       };
@@ -314,11 +567,14 @@ export function useVoice(
         recognition.start();
       } catch {
         setTimeout(() => {
-          if (!current.cancelled && session.current === current) listenLoop();
-        }, 500);
+          if (!current.cancelled && session.current === current && !muted) {
+            listenLoop();
+          }
+        }, 400);
       }
     };
 
+    current.restartListening = listenLoop;
     listenLoop();
   };
 
@@ -331,8 +587,9 @@ export function useVoice(
     setMuted(false);
     setSpeakerMuted(false);
     setStartedAt(undefined);
-    setPhase('listening');
+    updatePhase('listening');
     setCaption('');
+    activeCaptionRef.current = '';
     setUserCaption('');
 
     // If caller explicitly prefers free browser mode or if WebRTC is bypassed
@@ -343,7 +600,7 @@ export function useVoice(
 
     let stream: MediaStream | undefined;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia(AUDIO_CONSTRAINTS);
       if (attempt !== generation.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
@@ -419,11 +676,17 @@ export function useVoice(
           data.type === 'response.audio_transcript.delta' ||
           data.type === 'response.output_audio_transcript.delta'
         ) {
-          setPhase('speaking');
+          updatePhase('speaking');
           setCaption((value) => `${value}${String(data.delta ?? '')}`);
         }
         if (data.type === 'input_audio_buffer.speech_started') {
-          setPhase('listening');
+          if (current.mode === 'webrtc') {
+            try {
+              current.audio.pause();
+              current.audio.currentTime = 0;
+            } catch {}
+          }
+          updatePhase('listening');
           setCaption('');
         }
         if (
@@ -438,7 +701,7 @@ export function useVoice(
           data.type === 'response.audio.done' ||
           data.type === 'response.output_audio_transcript.done'
         ) {
-          setPhase('listening');
+          updatePhase('listening');
           if (typeof data.transcript === 'string')
             current.transcript.push(`Dot: ${data.transcript}`);
         }
@@ -454,7 +717,7 @@ export function useVoice(
         )
           return;
         let output: string;
-        setPhase('thinking');
+        updatePhase('thinking');
         try {
           const args: unknown = JSON.parse(String(data.arguments));
           if (
@@ -552,6 +815,8 @@ export function useVoice(
           try {
             current.recognition?.abort();
           } catch {}
+        } else {
+          current.restartListening?.();
         }
       }
     }
@@ -567,6 +832,12 @@ export function useVoice(
       } else {
         if (next) {
           current.stopAudio?.();
+          current.stopAudio = undefined;
+          if (typeof window !== 'undefined' && window.speechSynthesis) {
+            try {
+              window.speechSynthesis.cancel();
+            } catch {}
+          }
         }
       }
     }
@@ -578,6 +849,7 @@ export function useVoice(
     error,
     start,
     end,
+    interrupt,
     muted,
     speakerMuted,
     startedAt,

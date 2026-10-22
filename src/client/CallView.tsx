@@ -7,6 +7,7 @@ import {
   Volume2,
   VolumeX,
   Maximize2,
+  Square,
 } from 'lucide-react';
 import { Mascot } from './Mascot';
 import type { Dot } from '../shared/types';
@@ -68,6 +69,45 @@ export function CallView({
         </span>
         <p role="status">{label}</p>
       </div>
+
+      {!minimized && voice.status === 'active' && (
+        <div className="call-action-row">
+          {voice.phase === 'speaking' ? (
+            <button
+              type="button"
+              className="call-interrupt-btn speaking"
+              onClick={() => voice.interrupt('button')}
+              aria-label={`Interrupt ${dot.name} and speak`}
+              title="Interrupt Dot (or speak to barge in)"
+            >
+              <span className="interrupt-icon-wrapper">
+                <Square size={16} fill="currentColor" />
+              </span>
+              <span className="interrupt-label">Interrupt Dot</span>
+              <span className="interrupt-sublabel">or just speak</span>
+            </button>
+          ) : voice.phase === 'thinking' ? (
+            <button
+              type="button"
+              className="call-interrupt-btn thinking"
+              onClick={() => voice.interrupt('button')}
+              aria-label="Cancel thinking and return to listening"
+              title="Cancel pending response"
+            >
+              <span className="interrupt-icon-wrapper">
+                <Square size={16} fill="currentColor" />
+              </span>
+              <span className="interrupt-label">Cancel Thinking</span>
+            </button>
+          ) : (
+            <div className="call-listening-indicator" aria-live="polite">
+              <span className="listening-pulse" />
+              <span>Dot is listening — speak naturally</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {!minimized && (
         <div className="call-caption" aria-live="polite">
           {voice.userCaption && (
@@ -99,6 +139,33 @@ export function CallView({
           <span>{voice.speakerMuted ? <VolumeX /> : <Volume2 />}</span>
           <small>Speaker</small>
         </button>
+
+        {voice.status === 'active' &&
+          (voice.phase === 'speaking' || voice.phase === 'thinking') && (
+            <button
+              type="button"
+              className="call-interrupt-ctrl"
+              aria-label={
+                voice.phase === 'speaking'
+                  ? `Interrupt ${dot.name}`
+                  : 'Cancel thinking'
+              }
+              title={
+                voice.phase === 'speaking'
+                  ? 'Interrupt speech'
+                  : 'Cancel thinking'
+              }
+              onClick={() => voice.interrupt('button')}
+            >
+              <span>
+                <Square size={20} fill="currentColor" />
+              </span>
+              <small>
+                {voice.phase === 'speaking' ? 'Interrupt' : 'Cancel'}
+              </small>
+            </button>
+          )}
+
         <button
           className="call-end"
           aria-label="End voice call"
