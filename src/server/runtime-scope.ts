@@ -77,7 +77,7 @@ export function validateRuntimeScope(
   const resolveDot = (val?: string) => {
     if (!val) return undefined;
     if (val.startsWith('chat-')) {
-      const thread = workspace.conversations().find((t) => t.id === val.slice(5));
+      const thread = workspace.findThread(val.slice(5));
       if (thread) return workspace.dot(thread.dotId);
       return workspace.dots()[0];
     }

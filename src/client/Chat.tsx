@@ -100,11 +100,12 @@ export function Chat({
       .then((page) => {
         if (active) setPageContext(page);
       })
-      .catch(() => {
-        if (active)
-          setContextError(
-            'Conversation context could not load. Retry before sending your message.',
-          );
+      .catch((err) => {
+        if (active) {
+          console.warn('[Chat] Could not load page-context:', err);
+          // Set to null so conversation can continue cleanly even if unlinked to a Space page
+          setPageContext(null);
+        }
       });
     return () => {
       active = false;

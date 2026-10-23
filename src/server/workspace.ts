@@ -438,19 +438,42 @@ export class WorkspaceStore {
       );
     return value;
   }
+  findThread(id: string): Conversation | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM thread_bindings WHERE id=?')
+      .get(id) as any;
+    if (!row) return undefined;
+    return {
+      id: String(row.id),
+      dotId: String(row.dotId),
+      ownerId: String(row.ownerId),
+      title: String(row.title),
+      createdAt: Number(row.createdAt),
+      learningContainerId: row.learningContainerId
+        ? String(row.learningContainerId)
+        : null,
+    };
+  }
   requireThread(id: string, dotId?: string, ownerId?: string): Conversation {
-    const thread = (ownerId ? this.conversations(ownerId) : this.conversations()).find((t) => t.id === id);
-    if (!thread || (dotId && thread.dotId !== dotId))
+    const thread = this.findThread(id);
+    if (!thread)
+      throw new Error('Conversation does not belong to this Dot and owner.');
+    if (dotId && thread.dotId !== dotId)
+      throw new Error('Conversation does not belong to this Dot and owner.');
+    if (
+      ownerId &&
+      thread.ownerId !== ownerId &&
+      thread.ownerId !== this.ownerId &&
+      ownerId !== this.ownerId
+    )
       throw new Error('Conversation does not belong to this Dot and owner.');
     return thread;
   }
   ensureThread(id: string, dotId: string, ownerId?: string): Conversation {
+    const existing = this.findThread(id);
+    if (existing) return existing;
     const targetOwner = ownerId ?? this.ownerId;
-    const thread = this.conversations(targetOwner).find((t) => t.id === id);
-    if (!thread) {
-      return this.bindThread(id, dotId, 'A new thought', targetOwner);
-    }
-    return thread;
+    return this.bindThread(id, dotId, 'A new thought', targetOwner);
   }
   bindTask(taskId: string, threadId: string) {
     this.requireThread(threadId);

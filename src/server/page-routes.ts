@@ -51,7 +51,8 @@ export function pageRoutes(platform: Platform) {
   });
   app.get('/conversations/:id/page-context', (c) => {
     const thread = platform.workspace.requireThread(c.req.param('id'));
-    const dot = platform.workspace.dot(thread.dotId)!;
+    const dot = platform.workspace.dot(thread.dotId);
+    if (!dot) return c.json(null);
     const page = platform.workspace.pages.forThread(thread.id);
     return c.json(
       page && platform.workspace.canAccessSpace(dot.id, page.spaceId)
