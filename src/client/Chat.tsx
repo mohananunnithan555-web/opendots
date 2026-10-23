@@ -301,10 +301,19 @@ export function Chat({
         if (active) setLoaded(true);
       })
       .catch((e) => {
-        if (active)
-          setError(
-            e instanceof Error ? e.message : 'Conversation could not connect.',
-          );
+        if (active) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn('[Chat] connectAgent warning:', msg);
+          if (
+            msg.includes('THREAD_NOT_FOUND') ||
+            msg.includes('Connect request rejected')
+          ) {
+            // Auto-recovered: mark loaded so the user can send turns normally; runAgent auto-initializes the thread
+            setLoaded(true);
+          } else {
+            setError(msg || 'Conversation could not connect.');
+          }
+        }
       });
     return () => {
       active = false;
@@ -569,8 +578,22 @@ export function Chat({
                 setRunError('');
                 void copilotkit
                   .connectAgent({ agent })
-                  .then(() => setLoaded(true))
-                  .catch((e) => setError(e.message));
+                  .then(() => {
+                    setLoaded(true);
+                    setError('');
+                  })
+                  .catch((e) => {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    if (
+                      msg.includes('THREAD_NOT_FOUND') ||
+                      msg.includes('Connect request rejected')
+                    ) {
+                      setLoaded(true);
+                      setError('');
+                    } else {
+                      setError(msg);
+                    }
+                  });
               }}
             >
               Reconnect

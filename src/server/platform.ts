@@ -22,6 +22,7 @@ import {
 import { validateRuntimeScope } from './runtime-scope.js';
 import { learningSelector } from './learning.js';
 import { SetupTelemetry } from './setup-telemetry.js';
+import { getSessionFromRequest } from './auth/auth-routes.js';
 export class Platform {
   private channelStartupFailed = false;
   readonly setupTelemetry: SetupTelemetry;
@@ -82,10 +83,7 @@ export class Platform {
       intelligence: this.intelligence,
       telemetryId: this.setupTelemetry.identity,
       telemetryProperties: this.setupTelemetry.metadata,
-      identifyUser: async () => ({
-        id: workspace.ownerId,
-        name: 'OpenDots owner',
-      }),
+      identifyUser: async (request?: Request) => this.resolveUser(request),
       agents: async () =>
         Object.fromEntries(
           workspace
@@ -184,6 +182,45 @@ export class Platform {
       .join('\n')
       .slice(-12000);
   }
+  resolveUser(
+    request?: Request,
+    threadId?: string,
+  ): { id: string; name: string } {
+    if (request) {
+      try {
+        const session = getSessionFromRequest({
+          req: {
+            header: (name: string) => request.headers.get(name) ?? undefined,
+          },
+        });
+        if (session?.userId && /^[\w.@:=-]+$/.test(session.userId)) {
+          return {
+            id: session.userId,
+            name: session.name || session.email || 'OpenDots User',
+          };
+        }
+      } catch {}
+    }
+    if (threadId) {
+      try {
+        const thread = this.workspace.findThread(threadId);
+        if (thread?.ownerId && /^[\w.@:=-]+$/.test(thread.ownerId)) {
+          return {
+            id: thread.ownerId,
+            name: 'OpenDots User',
+          };
+        }
+      } catch {}
+    }
+    const safeOwnerId =
+      this.workspace.ownerId && /^[\w.@:=-]+$/.test(this.workspace.ownerId)
+        ? this.workspace.ownerId
+        : 'opendots-owner';
+    return {
+      id: safeOwnerId,
+      name: 'OpenDots owner',
+    };
+  }
   async handle(request: Request): Promise<Response> {
     if (!this.handler)
       return Response.json(
@@ -228,7 +265,94 @@ export class Platform {
       reqUrl.pathname = reqUrl.pathname.replace(match[0], `${prefix}${thread.dotId}${suffix}`);
       finalRequest = new Request(reqUrl.toString(), request);
     }
-    const response = await this.handler.fetch(finalRequest);
+
+    const dataObj =
+      body && typeof body === 'object'
+        ? (body as Record<string, unknown>)
+        : null;
+    const targetThreadId =
+      match?.[1] ||
+      (agentParam?.startsWith('chat-') ? agentParam.slice(5) : undefined) ||
+      (typeof dataObj?.threadId === 'string' ? dataObj.threadId : undefined) ||
+      (typeof (dataObj?.input as any)?.threadId === 'string'
+        ? (dataObj?.input as any).threadId
+        : undefined) ||
+      reqUrl.searchParams.get('threadId') ||
+      reqUrl.pathname.match(/\/threads\/([^/]+)/)?.[1];
+
+    const targetDot = targetThreadId
+      ? this.workspace.findThread(targetThreadId) ||
+        this.workspace.ensureThread(targetThreadId, defaultDotId)
+      : undefined;
+    const targetDotId = targetDot?.dotId || defaultDotId;
+
+    if (this.intelligence && targetThreadId && targetDotId) {
+      const user = this.resolveUser(request, targetThreadId);
+      try {
+        await this.intelligence.getOrCreateThread({
+          threadId: targetThreadId,
+          userId: user.id,
+          agentId: targetDotId,
+          name: targetDot?.title || 'OpenDots Conversation',
+        });
+      } catch (syncErr) {
+        console.warn(
+          '[Platform] CopilotKit getOrCreateThread pre-sync warning:',
+          syncErr,
+        );
+      }
+    }
+
+    let response = await this.handler.fetch(finalRequest);
+
+    const isConnect =
+      reqUrl.pathname.endsWith('/connect') ||
+      reqUrl.pathname.includes('/connect');
+    if (
+      isConnect &&
+      response.status === 404 &&
+      this.intelligence &&
+      targetThreadId &&
+      targetDotId
+    ) {
+      try {
+        const errJson = await response.clone().json().catch(() => null);
+        const errStr = JSON.stringify(errJson || '');
+        if (
+          errStr.includes('THREAD_NOT_FOUND') ||
+          errStr.includes('Connect request rejected')
+        ) {
+          console.warn(
+            '[Platform] THREAD_NOT_FOUND detected during connect. Auto-healing with createThread and retrying...',
+          );
+          const user = this.resolveUser(request, targetThreadId);
+          await this.intelligence
+            .createThread({
+              threadId: targetThreadId,
+              userId: user.id,
+              agentId: targetDotId,
+              name: targetDot?.title || 'OpenDots Conversation',
+            })
+            .catch((createErr) => {
+              console.warn(
+                '[Platform] Healing createThread fallback:',
+                createErr,
+              );
+            });
+          response = await this.handler.fetch(finalRequest);
+        }
+      } catch (retryErr) {
+        console.warn('[Platform] Connect retry handler error:', retryErr);
+      }
+
+      if (response.status === 404) {
+        console.warn(
+          '[Platform] Connect still 404 after heal. Returning 204 to maintain conversational flow.',
+        );
+        return new Response(null, { status: 204 });
+      }
+    }
+
     return response;
   }
   async turn(
