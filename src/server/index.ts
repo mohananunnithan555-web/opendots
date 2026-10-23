@@ -11,6 +11,7 @@ import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
 import { TaskPlanner } from './planner/task-planner.js';
 import { ProactiveResearchService } from './research/proactive-monitor.js';
+import { initCloudDatabase } from './db/postgres-pool.js';
 import {
   agentRunTimeoutMsFromEnv,
   intelligenceApiKeyFromEnv,
@@ -35,6 +36,7 @@ const workspace = new WorkspaceStore(
   database,
   process.env.OWNER_ID ?? 'opendots-owner',
 );
+void initCloudDatabase();
 const config: PlatformConfig = {
   intelligenceKey: intelligenceApiKeyFromEnv(process.env),
   intelligenceApiUrl: process.env.INTELLIGENCE_API_URL || undefined,

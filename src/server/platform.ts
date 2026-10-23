@@ -147,14 +147,15 @@ export class Platform {
     await this.setupTelemetry.stop();
     await this.handler?.channels?.stop();
   }
-  async createConversation(dotId: string, title: string) {
+  async createConversation(dotId: string, title: string, userId?: string) {
     this.requireReady();
     if (!this.workspace.dot(dotId)) throw new Error('Dot not found.');
     const id = randomUUID();
+    const owner = userId || this.workspace.ownerId;
     try {
       await this.intelligence!.createThread({
         threadId: id,
-        userId: this.workspace.ownerId,
+        userId: owner,
         agentId: dotId,
         name: title,
       });
@@ -163,14 +164,15 @@ export class Platform {
         'Intelligence could not create this conversation. Check the runtime key and connection.',
       );
     }
-    return this.workspace.bindThread(id, dotId, title);
+    return this.workspace.bindThread(id, dotId, title, owner);
   }
-  async history(threadId: string): Promise<string> {
+  async history(threadId: string, userId?: string): Promise<string> {
     this.requireReady();
-    this.workspace.requireThread(threadId);
+    const owner = userId || this.workspace.ownerId;
+    this.workspace.requireThread(threadId, undefined, owner);
     const history = await this.intelligence!.getThreadMessages({
       threadId,
-      userId: this.workspace.ownerId,
+      userId: owner,
     });
     return history.messages
       .filter((message) => ['user', 'assistant'].includes(message.role))

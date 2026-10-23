@@ -44,15 +44,16 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     platform.setupTelemetry.capture(event);
     return c.json({ ok: true });
   });
-  app.get('/workspace', (c) =>
-    c.json({
+  app.get('/workspace', (c) => {
+    const userId = ((c.get as any)('userId') as string | undefined) || platform.workspace.ownerId;
+    return c.json({
       spaces: platform.workspace.spaces(),
       dots: platform.workspace.dots(),
-      conversations: platform.workspace.conversations(),
+      conversations: platform.workspace.conversations(userId),
       setup: platform.setup(),
       calls: platform.workspace.calls(),
-    }),
-  );
+    });
+  });
   app.post('/spaces', async (c) => {
     const data = z
       .object({
@@ -248,8 +249,9 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         { error: `Setup required: ${platform.setup().missing.join(', ')}.` },
         503,
       );
+    const userId = ((c.get as any)('userId') as string | undefined) || platform.workspace.ownerId;
     return c.json(
-      await platform.createConversation(data.data.dotId, data.data.title),
+      await platform.createConversation(data.data.dotId, data.data.title, userId),
       201,
     );
   });

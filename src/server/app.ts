@@ -56,6 +56,8 @@ import {
   initializeReminderTools,
   parseNaturalLanguageReminder,
 } from './reminders/index.js';
+import { AuthStore } from './auth/auth-store.js';
+import { authRoutes, getSessionFromRequest } from './auth/auth-routes.js';
 import type { ReminderRecurrence, ReminderStatus } from '../shared/types.js';
 const interval = z.number().int().min(60).max(31_536_000).nullable();
 export interface AppOptions {
@@ -75,11 +77,13 @@ export function createApp({
   platform,
 }: AppOptions) {
   const app = new Hono();
+  const authStore = new AuthStore(store.rawDb);
   const taskPlanner = new TaskPlanner(store);
   const proactiveService = new ProactiveResearchService(store);
   initializeReminderTools(store);
   const reminderService = new ReminderService(store);
   reminderService.start();
+  app.route('/api/auth', authRoutes(authStore));
   app.use(
     '/api/*',
     bodyLimit({
@@ -122,7 +126,20 @@ export function createApp({
       return c.json({ error: 'Cross-origin requests are not allowed.' }, 403);
     if (c.req.header('sec-fetch-site') === 'cross-site')
       return c.json({ error: 'Cross-site requests are not allowed.' }, 403);
-    if (ownerToken) {
+
+    // Extract user session if present
+    const isAuthRoute = requestUrl.pathname.startsWith('/api/auth');
+    const session = getSessionFromRequest(c);
+    if (session) {
+      (c.set as any)('userId', session.userId);
+      (c.set as any)('userEmail', session.email);
+      (c.set as any)('userName', session.name);
+      (c.set as any)('session', session);
+    } else {
+      (c.set as any)('userId', 'opendots-owner');
+    }
+
+    if (ownerToken && !session && !isAuthRoute) {
       const expected = Buffer.from(ownerToken);
       const supplied = Buffer.from(
         c.req.header('authorization')?.replace(/^Bearer /, '') ?? '',
@@ -132,7 +149,7 @@ export function createApp({
         !timingSafeEqual(expected, supplied)
       )
         return c.json(
-          { error: 'Enter your owner access token to unlock OpenDots.' },
+          { error: 'Enter your owner access token or sign in with Google to unlock OpenDots.' },
           401,
         );
     }

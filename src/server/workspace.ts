@@ -404,20 +404,22 @@ export class WorkspaceStore {
       )
       .run(sessionId, policyHash, id);
   }
-  conversations(): Conversation[] {
+  conversations(ownerId?: string): Conversation[] {
+    const targetOwner = ownerId ?? this.ownerId;
     return this.db
       .prepare(
         'SELECT * FROM thread_bindings WHERE ownerId=? ORDER BY createdAt DESC',
       )
-      .all(this.ownerId) as unknown as Conversation[];
+      .all(targetOwner) as unknown as Conversation[];
   }
-  bindThread(id: string, dotId: string, title: string): Conversation {
+  bindThread(id: string, dotId: string, title: string, ownerId?: string): Conversation {
     const dot = this.dot(dotId);
     if (!dot) throw new Error('Dot not found.');
+    const targetOwner = ownerId ?? this.ownerId;
     const value: Conversation = {
       id,
       dotId,
-      ownerId: this.ownerId,
+      ownerId: targetOwner,
       title,
       createdAt: Date.now(),
       learningContainerId: dot.learningContainerId ?? null,
@@ -429,23 +431,24 @@ export class WorkspaceStore {
       .run(
         id,
         dotId,
-        this.ownerId,
+        targetOwner,
         title,
         value.createdAt,
         value.learningContainerId ?? null,
       );
     return value;
   }
-  requireThread(id: string, dotId?: string): Conversation {
-    const thread = this.conversations().find((thread) => thread.id === id);
+  requireThread(id: string, dotId?: string, ownerId?: string): Conversation {
+    const thread = (ownerId ? this.conversations(ownerId) : this.conversations()).find((t) => t.id === id);
     if (!thread || (dotId && thread.dotId !== dotId))
       throw new Error('Conversation does not belong to this Dot and owner.');
     return thread;
   }
-  ensureThread(id: string, dotId: string): Conversation {
-    const thread = this.conversations().find((t) => t.id === id);
+  ensureThread(id: string, dotId: string, ownerId?: string): Conversation {
+    const targetOwner = ownerId ?? this.ownerId;
+    const thread = this.conversations(targetOwner).find((t) => t.id === id);
     if (!thread) {
-      return this.bindThread(id, dotId, 'A new thought');
+      return this.bindThread(id, dotId, 'A new thought', targetOwner);
     }
     return thread;
   }

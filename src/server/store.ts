@@ -318,6 +318,9 @@ export class Store {
   clearSetupTelemetry() {
     this.db.prepare('DELETE FROM setup_telemetry').run();
   }
+  get rawDb(): DatabaseSync {
+    return this.db;
+  }
   close() {
     this.db.close();
   }

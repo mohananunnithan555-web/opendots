@@ -70,6 +70,8 @@ import { McpDirectoryModal } from './McpDirectoryModal';
 import { CoworkProjectWorkspace } from './CoworkProjectWorkspace';
 import { RemindersDashboard } from './RemindersDashboard';
 import { playReminderChime, speakReminderAnnouncement } from './reminders-service';
+import { GoogleAuthManager, LegacySyncBanner } from './GoogleAuth';
+import type { UserProfile } from '../server/auth/types';
 
 function describeFailure(error: unknown, fallback: string) {
   return {
@@ -98,6 +100,9 @@ export function App() {
   const dirtyPage = useRef(false);
   const [spaceId, setSpaceId] = useState('');
   const [pageId, setPageId] = useState<string>();
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [legacyStatus, setLegacyStatus] = useState<any>(null);
+  const [dismissedLegacyBanner, setDismissedLegacyBanner] = useState(false);
   const setDirtyPage = useCallback((value: boolean) => {
     dirtyPage.current = value;
   }, []);
@@ -215,6 +220,22 @@ export function App() {
     const timer = setInterval(() => void refresh(), 3000);
     return () => clearInterval(timer);
   }, [refresh]);
+  useEffect(() => {
+    api<{
+      authenticated: boolean;
+      user: UserProfile | null;
+      legacyDataFound?: any;
+    }>('/auth/me')
+      .then((data) => {
+        if (data.authenticated && data.user) {
+          setUser(data.user);
+        }
+        if (data.legacyDataFound) {
+          setLegacyStatus(data.legacyDataFound);
+        }
+      })
+      .catch(() => {});
+  }, []);
   useEffect(() => {
     setCapture(undefined);
     if (!selectedThread) return;
@@ -661,6 +682,20 @@ export function App() {
             <span>Make it your own</span>
             <ArrowUpRight size={13} />
           </a>
+          <GoogleAuthManager
+            user={user}
+            onUserChange={(newUser) => {
+              setUser(newUser);
+              void refresh();
+            }}
+            legacyStatus={legacyStatus}
+            onLegacyMigrated={() => {
+              setLegacyStatus((prev: any) =>
+                prev ? { ...prev, hasLegacy: false } : null,
+              );
+              void refresh();
+            }}
+          />
           <div className="version">
             OPEN SOURCE TEMPLATE <span>v0.1</span>
           </div>
@@ -751,6 +786,23 @@ export function App() {
             </button>
           </div>
         </header>
+        {user && legacyStatus?.hasLegacy && !dismissedLegacyBanner && (
+          <LegacySyncBanner
+            legacyStatus={legacyStatus}
+            onMigrate={async () => {
+              try {
+                await api('/auth/migrate-legacy', 'POST');
+                setLegacyStatus((prev: any) =>
+                  prev ? { ...prev, hasLegacy: false } : null,
+                );
+                void refresh();
+              } catch (err: any) {
+                alert(`Migration failed: ${err.message || 'Error migrating data'}`);
+              }
+            }}
+            onDismiss={() => setDismissedLegacyBanner(true)}
+          />
+        )}
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>

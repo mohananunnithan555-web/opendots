@@ -4431,3 +4431,539 @@ button.icon-button.voice-typing-btn.unsupported {
   box-shadow: 0 2px 8px rgba(220, 38, 38, 0.12);
 }
 
+
+/* ====================================================================
+   GOOGLE SIGN-IN, PROFILE BADGE, AND CLOUD PERSISTENCE UI
+   ==================================================================== */
+
+.sidebar-auth-section {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  margin-top: auto;
+}
+
+.sidebar-signin-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  color: var(--text-primary, #ffffff);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sidebar-signin-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.sidebar-user-badge {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sidebar-user-badge:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--accent-primary, #00d2ff);
+}
+
+.user-avatar-wrap {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.user-avatar-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.user-avatar-initials {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.user-cloud-indicator {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  background: #10b981;
+  color: #fff;
+  border-radius: 50%;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #090b10;
+}
+
+.user-badge-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  line-height: 1.25;
+}
+
+.user-badge-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary, #ffffff);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-badge-email {
+  font-size: 11px;
+  color: var(--text-muted, rgba(255, 255, 255, 0.5));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Modals */
+.auth-modal-card {
+  max-width: 440px;
+  background: var(--bg-surface, #141925);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.auth-modal-body,
+.account-modal-body {
+  padding: 20px 24px;
+}
+
+.auth-modal-desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.7));
+  margin-bottom: 20px;
+}
+
+.auth-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.google-btn-container {
+  display: flex;
+  justify-content: center;
+  margin: 18px 0;
+}
+
+.auth-setup-notice {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 10px;
+  color: #f59e0b;
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+
+.auth-setup-notice h4 {
+  margin: 0 0 4px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auth-setup-notice p {
+  margin: 0;
+  line-height: 1.4;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.8));
+}
+
+.auth-setup-notice code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: #fbbf24;
+}
+
+.dev-test-auth-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+}
+
+.dev-test-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted, rgba(255, 255, 255, 0.5));
+  margin-bottom: 8px;
+}
+
+.dev-test-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dev-input {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.dev-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.auth-benefits-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 16px;
+  font-size: 12px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.7));
+}
+
+.benefit-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.benefit-check {
+  color: #10b981;
+  flex-shrink: 0;
+}
+
+/* Account Modal */
+.account-modal-card {
+  max-width: 480px;
+  background: var(--bg-surface, #141925);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.account-user-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  margin-bottom: 18px;
+}
+
+.account-large-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.account-large-initials {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.account-card-details h4 {
+  margin: 0 0 2px 0;
+  font-size: 16px;
+  color: var(--text-primary, #ffffff);
+}
+
+.account-email-text {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+  color: var(--text-muted, rgba(255, 255, 255, 0.6));
+}
+
+.account-badge-verified {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #10b981;
+}
+
+.storage-status-card {
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.storage-status-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #ffffff);
+  margin-bottom: 4px;
+}
+
+.storage-status-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.status-green {
+  color: #34d399;
+}
+
+.status-amber {
+  color: #fbbf24;
+}
+
+.migration-card {
+  padding: 12px 14px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.migration-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #60a5fa;
+  margin-bottom: 4px;
+}
+
+.migration-desc {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.8));
+}
+
+.migration-success-msg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #34d399;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.account-actions-section {
+  margin-bottom: 18px;
+}
+
+.account-actions-section h4,
+.danger-zone-section h4 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted, rgba(255, 255, 255, 0.5));
+  margin: 0 0 10px 0;
+}
+
+.action-buttons-row {
+  display: flex;
+  gap: 10px;
+}
+
+.account-action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.account-action-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.signout-btn:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.danger-zone-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 14px;
+}
+
+.danger-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.danger-button:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.delete-confirm-box {
+  background: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.delete-warning-text {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.8));
+  margin: 0 0 8px 0;
+}
+
+.confirm-delete-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fff;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.delete-actions-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Legacy Migration Banner */
+.legacy-sync-banner {
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.15), rgba(16, 185, 129, 0.15));
+  border-bottom: 1px solid rgba(59, 130, 246, 0.3);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: #fff;
+}
+
+.legacy-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legacy-banner-icon {
+  color: #60a5fa;
+  flex-shrink: 0;
+}
+
+.legacy-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.banner-sync-btn {
+  background: #3b82f6;
+  border: none;
+  color: #fff;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.banner-sync-btn:hover {
+  opacity: 0.9;
+}
+
+.banner-dismiss-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.7);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.banner-dismiss-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
