@@ -7,7 +7,7 @@ import { Store } from '../src/server/store.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
 import { createApp } from '../src/server/app.js';
 import { Runner } from '../src/server/runner.js';
-import { Config } from '../src/server/platform-config.js';
+import type { PlatformConfig } from '../src/server/platform-config.js';
 
 describe('OpenDots — Google Sign-In & Multi-Tenant Cloud Storage', () => {
   let db: DatabaseSync;
@@ -238,7 +238,8 @@ describe('OpenDots — Google Sign-In & Multi-Tenant Cloud Storage', () => {
         config: {
           runtimeUrl: 'http://localhost:4310/api/copilotkit',
           agentRunTimeoutMs: 30000,
-        },
+          baseUrl: 'http://localhost:3000',
+        } as unknown as PlatformConfig,
       });
 
       // 1. Google login for Alice

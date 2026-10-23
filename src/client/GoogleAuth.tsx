@@ -36,11 +36,13 @@ export function GoogleAuthManager({
   onUserChange,
   legacyStatus,
   onLegacyMigrated,
+  variant = 'sidebar',
 }: {
   user: UserProfile | null;
   onUserChange: (user: UserProfile | null) => void;
   legacyStatus?: LegacyDataStatus;
   onLegacyMigrated?: () => void;
+  variant?: 'sidebar' | 'topbar';
 }) {
   const [config, setAuthConfig] = useState<AuthConfig | null>(null);
   const [showModal, setShowModal] = useState(false);
@@ -236,46 +238,79 @@ export function GoogleAuthManager({
 
   return (
     <>
-      {/* Sidebar Profile / Sign-in Badge */}
-      <div className="sidebar-auth-section">
-        {user ? (
-          <button
-            className="sidebar-user-badge"
-            onClick={() => setShowAccountModal(true)}
-            title="Account & Storage Settings"
-          >
-            <div className="user-avatar-wrap">
+      {variant === 'topbar' ? (
+        <div className="topbar-auth-section">
+          {user ? (
+            <button
+              className="topbar-user-badge"
+              onClick={() => setShowAccountModal(true)}
+              title="Account & Storage Settings"
+            >
               {user.picture ? (
                 <img
                   src={user.picture}
                   alt={user.name}
-                  className="user-avatar-img"
+                  className="topbar-avatar-img"
                   referrerPolicy="no-referrer"
                 />
               ) : (
-                <div className="user-avatar-initials">
+                <div className="topbar-avatar-initials">
                   {user.name.slice(0, 2).toUpperCase()}
                 </div>
               )}
-              <span className="user-cloud-indicator" title="Permanent Cloud Storage Enabled">
-                <Cloud size={10} />
-              </span>
-            </div>
-            <div className="user-badge-info">
-              <span className="user-badge-name">{user.name}</span>
-              <span className="user-badge-email">{user.email}</span>
-            </div>
-          </button>
-        ) : (
-          <button
-            className="sidebar-signin-button"
-            onClick={() => setShowModal(true)}
-          >
-            <LogIn size={15} />
-            <span>Sign in with Google</span>
-          </button>
-        )}
-      </div>
+              <span className="topbar-user-name">{user.name.split(' ')[0]}</span>
+            </button>
+          ) : (
+            <button
+              className="topbar-signin-button"
+              onClick={() => setShowModal(true)}
+            >
+              <LogIn size={14} />
+              <span>Sign in with Google</span>
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="sidebar-auth-section">
+          {user ? (
+            <button
+              className="sidebar-user-badge"
+              onClick={() => setShowAccountModal(true)}
+              title="Account & Storage Settings"
+            >
+              <div className="user-avatar-wrap">
+                {user.picture ? (
+                  <img
+                    src={user.picture}
+                    alt={user.name}
+                    className="user-avatar-img"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="user-avatar-initials">
+                    {user.name.slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <span className="user-cloud-indicator" title="Permanent Cloud Storage Enabled">
+                  <Cloud size={10} />
+                </span>
+              </div>
+              <div className="user-badge-info">
+                <span className="user-badge-name">{user.name}</span>
+                <span className="user-badge-email">{user.email}</span>
+              </div>
+            </button>
+          ) : (
+            <button
+              className="sidebar-signin-button"
+              onClick={() => setShowModal(true)}
+            >
+              <LogIn size={15} />
+              <span>Sign in with Google</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Sign-In Modal */}
       {showModal && (

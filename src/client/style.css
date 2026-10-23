@@ -4967,3 +4967,74 @@ button.icon-button.voice-typing-btn.unsupported {
   background: rgba(255, 255, 255, 0.05);
   color: #fff;
 }
+
+/* Topbar Auth Section */
+.topbar-auth-section {
+  display: flex;
+  align-items: center;
+  margin-left: 6px;
+}
+
+.topbar-signin-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #3b82f6;
+  border: none;
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+  transition: all 0.2s ease;
+}
+
+.topbar-signin-button:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+}
+
+.topbar-user-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  padding: 3px 10px 3px 4px;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.topbar-user-badge:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: #3b82f6;
+}
+
+.topbar-avatar-img {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.topbar-avatar-initials {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.topbar-user-name {
+  font-size: 12px;
+  font-weight: 500;
+}

@@ -470,6 +470,20 @@ export function App() {
           <Plus size={17} />
           <span>New chat</span>
         </button>
+        <GoogleAuthManager
+          user={user}
+          onUserChange={(newUser) => {
+            setUser(newUser);
+            void refresh();
+          }}
+          legacyStatus={legacyStatus}
+          onLegacyMigrated={() => {
+            setLegacyStatus((prev: any) =>
+              prev ? { ...prev, hasLegacy: false } : null,
+            );
+            void refresh();
+          }}
+        />
         <div className="spaces-heading nav-label">
           DOTS
           <button
@@ -682,20 +696,6 @@ export function App() {
             <span>Make it your own</span>
             <ArrowUpRight size={13} />
           </a>
-          <GoogleAuthManager
-            user={user}
-            onUserChange={(newUser) => {
-              setUser(newUser);
-              void refresh();
-            }}
-            legacyStatus={legacyStatus}
-            onLegacyMigrated={() => {
-              setLegacyStatus((prev: any) =>
-                prev ? { ...prev, hasLegacy: false } : null,
-              );
-              void refresh();
-            }}
-          />
           <div className="version">
             OPEN SOURCE TEMPLATE <span>v0.1</span>
           </div>
@@ -784,6 +784,21 @@ export function App() {
             >
               <Monitor size={18} />
             </button>
+            <GoogleAuthManager
+              variant="topbar"
+              user={user}
+              onUserChange={(newUser) => {
+                setUser(newUser);
+                void refresh();
+              }}
+              legacyStatus={legacyStatus}
+              onLegacyMigrated={() => {
+                setLegacyStatus((prev: any) =>
+                  prev ? { ...prev, hasLegacy: false } : null,
+                );
+                void refresh();
+              }}
+            />
           </div>
         </header>
         {user && legacyStatus?.hasLegacy && !dismissedLegacyBanner && (
