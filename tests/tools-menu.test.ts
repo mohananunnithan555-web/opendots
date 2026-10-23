@@ -19,7 +19,7 @@ describe('OpenDots Smart Tools Menu, File Uploads, Library & Integrations', () =
     store = new Store(':memory:');
     app = createApp({
       store,
-      runner: {} as any,
+      runner: { abortAll: () => {}, abort: () => {} } as any,
       config: {} as any,
     });
   });
@@ -211,6 +211,27 @@ describe('OpenDots Smart Tools Menu, File Uploads, Library & Integrations', () =
       const testAfter = store.testConnector('openai', 'opendots-owner');
       expect(testAfter.success).toBe(true);
       expect(testAfter.message).toContain('OpenAI Platform API key configured');
+    });
+  });
+
+  describe('Settings API & Theme Configuration', () => {
+    it('successfully accepts settings updates including freeOnlyMode and theme without invalid settings error', async () => {
+      const res = await app.request('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          researchAllowed: true,
+          memoryAllowed: true,
+          appsAllowed: false,
+          freeOnlyMode: true,
+          theme: 'light',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.researchAllowed).toBe(true);
+      expect(json.freeOnlyMode).toBe(true);
     });
   });
 });

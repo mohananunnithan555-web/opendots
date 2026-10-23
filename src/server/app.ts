@@ -396,8 +396,13 @@ export function createApp({
         researchAllowed: z.boolean().optional(),
         memoryAllowed: z.boolean().optional(),
         appsAllowed: z.boolean().optional(),
+        approvalPolicy: z.enum(['always_ask', 'category_based', 'pre_authorized']).optional(),
+        proactiveGoalsAllowed: z.boolean().optional(),
+        disabledMemoryCategories: z.array(z.string()).optional(),
+        freeOnlyMode: z.boolean().optional(),
+        theme: z.enum(['system', 'light', 'dark']).optional(),
       })
-      .strict()
+      .passthrough()
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: 'Invalid settings.' }, 400);
     const previous = store.settings();

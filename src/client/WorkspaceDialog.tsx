@@ -177,6 +177,7 @@ export function WorkspaceDialog({
                 memoryAllowed: memory,
                 appsAllowed: apps,
                 freeOnlyMode,
+                theme,
               };
             }
             if (dialog.type === 'memory') {
