@@ -145,6 +145,11 @@ body {
   flex-direction: column;
   z-index: 40;
   box-shadow: 1px 0 0 0 var(--border-subtle);
+  overflow-y: auto;
+  overflow-x: hidden;
+  height: 100vh;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
 }
 
 .template-app .wordmark {
@@ -222,6 +227,41 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.template-app .dots-nav,
+.dots-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: min(40vh, 320px);
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+  padding-right: 2px;
+}
+
+.template-app .dots-nav::-webkit-scrollbar,
+.dots-nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+.template-app .dots-nav::-webkit-scrollbar-track,
+.dots-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.template-app .dots-nav::-webkit-scrollbar-thumb,
+.dots-nav::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: var(--radius-full);
+}
+
+.template-app .dots-nav::-webkit-scrollbar-thumb:hover,
+.dots-nav::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 .template-app .dot-nav-row {
