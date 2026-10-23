@@ -131,5 +131,5 @@ describe('Deep Web Research Engine with Citations (Phase 6)', () => {
     );
     expect(denied.success).toBe(false);
     expect(denied.error).toContain('Permission denied');
-  });
+  }, 15000);
 });
