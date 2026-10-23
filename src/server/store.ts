@@ -1405,6 +1405,22 @@ export class Store {
       return { success: hasToken, message: msg, timestamp: now };
     }
 
+    if (type === 'github') {
+      const hasToken = Boolean(process.env.GITHUB_TOKEN || conn.config.apiKey || conn.config.token);
+      const status = hasToken ? 'connected' : 'unconfigured';
+      const msg = hasToken ? 'GitHub integration verified. Ready for repo and PR inspection.' : 'GitHub token (GITHUB_TOKEN or Personal Access Token) not configured.';
+      this.updateConnector(type, { status, lastTestedAt: now, error: hasToken ? undefined : msg }, ownerId);
+      return { success: hasToken, message: msg, timestamp: now };
+    }
+
+    if (type === 'openai') {
+      const hasKey = Boolean(process.env.OPENAI_API_KEY || conn.config.apiKey);
+      const status = hasKey ? 'connected' : 'unconfigured';
+      const msg = hasKey ? 'OpenAI Platform API key configured and ready.' : 'OpenAI API key (OPENAI_API_KEY) not configured.';
+      this.updateConnector(type, { status, lastTestedAt: now, error: hasKey ? undefined : msg }, ownerId);
+      return { success: hasKey, message: msg, timestamp: now };
+    }
+
     return { success: true, message: `${conn.name} test ping passed.`, timestamp: now };
   }
 
@@ -1526,6 +1542,15 @@ export class Store {
           'venice_research',
           'venice_website_bridge',
         ],
+      },
+      {
+        id: 'conn-openai',
+        type: 'openai',
+        name: 'OpenAI Platform',
+        status: process.env.OPENAI_API_KEY ? 'connected' : 'unconfigured',
+        config: {},
+        permissions: ['Optional user-supplied OpenAI API key for alternative model inference'],
+        availableActions: ['chat_completions', 'embeddings', 'custom_models'],
       },
     ];
 

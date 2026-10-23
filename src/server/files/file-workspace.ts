@@ -208,6 +208,64 @@ export class FileWorkspace {
     };
   }
 
+  writeBuffer(
+    userPath: string,
+    buffer: Buffer,
+    category: FileCategory = 'general',
+    projectId?: string,
+  ): WriteFileResult {
+    const fullPath = this.resolveSafePath(userPath, projectId);
+    const ext = extname(fullPath).toLowerCase();
+
+    if (DISALLOWED_EXTENSIONS.has(ext)) {
+      throw new Error(`Security restriction: Creating executable file types ("${ext}") is prohibited.`);
+    }
+
+    const dir = resolve(fullPath, '..');
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+
+    writeFileSync(fullPath, buffer);
+    const stat = statSync(fullPath);
+    const rel = relative(this.baseDir, fullPath).replace(/\\/g, '/');
+
+    return {
+      name: fullPath.split(/[/\\]/).pop() ?? userPath,
+      relativePath: rel,
+      size: stat.size,
+      writtenAt: stat.mtimeMs,
+      category,
+    };
+  }
+
+  readBuffer(userPath: string, projectId?: string): { buffer: Buffer; name: string; size: number; relativePath: string } {
+    const fullPath = this.resolveSafePath(userPath, projectId);
+
+    if (!existsSync(fullPath)) {
+      throw new Error(`File "${userPath}" does not exist.`);
+    }
+
+    const stat = statSync(fullPath);
+    if (stat.isDirectory()) {
+      throw new Error(`"${userPath}" is a directory, not a file.`);
+    }
+
+    if (stat.size > MAX_FILE_SIZE_BYTES) {
+      throw new Error(`File size (${(stat.size / 1024 / 1024).toFixed(2)}MB) exceeds 10MB limit.`);
+    }
+
+    const buffer = readFileSync(fullPath);
+    const rel = relative(this.baseDir, fullPath).replace(/\\/g, '/');
+
+    return {
+      buffer,
+      name: fullPath.split(/[/\\]/).pop() ?? userPath,
+      relativePath: rel,
+      size: stat.size,
+    };
+  }
+
   /**
    * Versioned write: preserves a backup before overwriting existing files
    */

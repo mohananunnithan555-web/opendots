@@ -689,6 +689,36 @@ body {
   cursor: not-allowed;
 }
 
+/* Tools & Integrations Popover & Attachments */
+.tools-composer-popover {
+  animation: fadeInSlideUp 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tools-menu-item:hover {
+  background: var(--bg-hover, #1a2030) !important;
+}
+
+.tools-plus-button.active {
+  background: var(--accent-primary, #6366f1) !important;
+  color: #ffffff !important;
+}
+
+.chat-attachments-tray {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle, #252b38) transparent;
+}
+
+@keyframes fadeInSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Grok Mode Bar */
 .grok-mode-bar button {
   background: var(--bg-elevated) !important;

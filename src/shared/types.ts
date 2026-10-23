@@ -87,6 +87,7 @@ export type ConnectorType =
   | 'whatsapp'
   | 'slack'
   | 'venice'
+  | 'openai'
   | 'custom';
 
 export interface Connector {

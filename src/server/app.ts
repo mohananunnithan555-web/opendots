@@ -83,8 +83,8 @@ export function createApp({
   app.use(
     '/api/*',
     bodyLimit({
-      maxSize: 1_000_000,
-      onError: (c) => c.json({ error: 'Request is too large.' }, 413),
+      maxSize: 15_000_000, // 15MB to allow up to 10MB file attachments & sketches
+      onError: (c) => c.json({ error: 'Request is too large (max 10MB file limit).' }, 413),
     }),
   );
   app.use('/api/*', async (c, next) => {
@@ -1331,7 +1331,7 @@ export function createApp({
   });
 
   // -------------------------------------------------------------
-  // WORKSPACE FILE ACCESS & DOWNLOAD (Grok Upgrade)
+  // WORKSPACE FILE ACCESS & DOWNLOAD (Grok & Smart Tools Upgrade)
   // -------------------------------------------------------------
   app.get('/api/workspace-files', (c) => {
     const dir = c.req.query('directory') || '';
@@ -1344,30 +1344,192 @@ export function createApp({
     if (!filePath) {
       return c.json({ error: 'filePath parameter is required.' }, 400);
     }
+    const isDownload = c.req.query('download') === 'true';
     try {
-      const file = globalFileWorkspace.readFile(filePath);
+      const file = globalFileWorkspace.readBuffer(filePath);
       const ext = path.extname(file.name).toLowerCase();
       const mimeMap: Record<string, string> = {
         '.json': 'application/json; charset=utf-8',
         '.md': 'text/markdown; charset=utf-8',
         '.txt': 'text/plain; charset=utf-8',
         '.ts': 'text/plain; charset=utf-8',
+        '.tsx': 'text/plain; charset=utf-8',
         '.js': 'application/javascript; charset=utf-8',
+        '.jsx': 'application/javascript; charset=utf-8',
         '.py': 'text/plain; charset=utf-8',
         '.csv': 'text/csv; charset=utf-8',
         '.html': 'text/html; charset=utf-8',
         '.css': 'text/css; charset=utf-8',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.svg': 'image/svg+xml',
+        '.pdf': 'application/pdf',
       };
       const contentType = mimeMap[ext] || 'application/octet-stream';
-      return new Response(file.content, {
+      const disposition = isDownload ? 'attachment' : 'inline';
+      return new Response(new Uint8Array(file.buffer), {
         status: 200,
         headers: {
           'Content-Type': contentType,
-          'Content-Disposition': `attachment; filename="${encodeURIComponent(file.name)}"`,
+          'Content-Disposition': `${disposition}; filename="${encodeURIComponent(file.name)}"`,
         },
       });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'File not found.' }, 404);
+    }
+  });
+
+  // Upload file endpoint for chat attachments & sketches
+  app.post('/api/files/upload', async (c) => {
+    try {
+      const contentType = c.req.header('content-type') || '';
+      let filename = 'attachment';
+      let buffer: Buffer;
+      let mime = 'application/octet-string';
+      let categoryType = 'general';
+
+      if (contentType.includes('multipart/form-data')) {
+        const formData = await c.req.formData();
+        const file = formData.get('file');
+        if (!file || !(file instanceof Blob)) {
+          return c.json({ error: 'No file provided in form data.' }, 400);
+        }
+        filename = (file as any).name || 'upload';
+        mime = file.type || 'application/octet-stream';
+        const arrayBuf = await file.arrayBuffer();
+        buffer = Buffer.from(arrayBuf);
+      } else {
+        const body = await c.req.json().catch(() => ({}));
+        if (!body || !body.content) {
+          return c.json({ error: 'File content is required.' }, 400);
+        }
+        filename = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'attachment';
+        mime = body.mimeType || 'application/octet-stream';
+        categoryType = body.category || 'general';
+
+        if (typeof body.content === 'string' && body.content.startsWith('data:')) {
+          const match = body.content.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            mime = match[1];
+            buffer = Buffer.from(match[2], 'base64');
+          } else {
+            buffer = Buffer.from(body.content, 'utf-8');
+          }
+        } else if (typeof body.content === 'string' && body.isBase64) {
+          buffer = Buffer.from(body.content, 'base64');
+        } else {
+          buffer = Buffer.from(String(body.content), 'utf-8');
+        }
+      }
+
+      if (buffer.length > 10 * 1024 * 1024) {
+        return c.json({ error: 'File size exceeds maximum limit of 10MB.' }, 413);
+      }
+
+      // Sanitize filename
+      const cleanName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const ext = path.extname(cleanName).toLowerCase();
+      const targetSubDir = categoryType === 'sketch' ? 'sketches' : 'uploads';
+      const safeRelPath = `${targetSubDir}/${Date.now()}_${cleanName}`;
+
+      globalFileWorkspace.writeBuffer(safeRelPath, buffer);
+
+      // Determine friendly file type
+      let resolvedType: 'image' | 'document' | 'code' | 'data' | 'sketch' | 'general' = 'general';
+      if (categoryType === 'sketch') {
+        resolvedType = 'sketch';
+      } else if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext) || mime.startsWith('image/')) {
+        resolvedType = 'image';
+      } else if (['.pdf', '.docx', '.doc', '.txt', '.md', '.rtf'].includes(ext)) {
+        resolvedType = 'document';
+      } else if (['.ts', '.tsx', '.js', '.jsx', '.py', '.html', '.css', '.json', '.sql', '.sh', '.yml', '.yaml'].includes(ext)) {
+        resolvedType = 'code';
+      } else if (['.csv', '.tsv', '.xlsx'].includes(ext)) {
+        resolvedType = 'data';
+      }
+
+      // If text/doc/code/data, generate a snippet for context
+      let textSnippet: string | undefined = undefined;
+      if (['document', 'code', 'data'].includes(resolvedType) && ext !== '.pdf' && ext !== '.docx' && ext !== '.doc') {
+        try {
+          const text = buffer.toString('utf-8');
+          textSnippet = text.length > 4000 ? text.slice(0, 4000) + '... [truncated]' : text;
+        } catch {}
+      }
+
+      return c.json({
+        success: true,
+        file: {
+          id: safeRelPath,
+          name: cleanName,
+          path: safeRelPath,
+          relativePath: safeRelPath,
+          size: buffer.length,
+          type: resolvedType,
+          mimeType: mime,
+          previewUrl: `/api/workspace-files/raw?filePath=${encodeURIComponent(safeRelPath)}`,
+          textSnippet,
+          uploadedAt: Date.now(),
+        },
+      });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'File upload failed.' }, 500);
+    }
+  });
+
+  // Library browser endpoint: lists existing workspace files, generated images, and sketches
+  app.get('/api/files/library', (c) => {
+    try {
+      const query = (c.req.query('query') || '').trim().toLowerCase();
+      const typeFilter = (c.req.query('type') || 'all').toLowerCase();
+      const allFiles = globalFileWorkspace.listFiles('');
+
+      const mapped = allFiles
+        .filter((f) => !f.name.startsWith('.') && !f.relativePath.includes('.versions/'))
+        .map((f) => {
+          const ext = f.extension.toLowerCase();
+          let resolvedType: 'image' | 'document' | 'code' | 'data' | 'sketch' | 'general' = 'general';
+          if (f.relativePath.startsWith('sketches/')) {
+            resolvedType = 'sketch';
+          } else if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext)) {
+            resolvedType = 'image';
+          } else if (['.pdf', '.docx', '.doc', '.txt', '.md', '.rtf'].includes(ext)) {
+            resolvedType = 'document';
+          } else if (['.ts', '.tsx', '.js', '.jsx', '.py', '.html', '.css', '.json', '.sql', '.sh', '.yml', '.yaml'].includes(ext)) {
+            resolvedType = 'code';
+          } else if (['.csv', '.tsv', '.xlsx'].includes(ext)) {
+            resolvedType = 'data';
+          }
+
+          return {
+            id: f.relativePath,
+            name: f.name,
+            path: f.relativePath,
+            size: f.size,
+            extension: f.extension,
+            category: f.category,
+            type: resolvedType,
+            previewUrl: `/api/workspace-files/raw?filePath=${encodeURIComponent(f.relativePath)}`,
+            modifiedAt: f.modifiedAt,
+          };
+        })
+        .filter((f) => {
+          if (query && !f.name.toLowerCase().includes(query) && !f.path.toLowerCase().includes(query)) {
+            return false;
+          }
+          if (typeFilter !== 'all' && f.type !== typeFilter) {
+            return false;
+          }
+          return true;
+        })
+        .sort((a, b) => b.modifiedAt - a.modifiedAt);
+
+      return c.json({ files: mapped });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Failed to load file library.' }, 500);
     }
   });
 

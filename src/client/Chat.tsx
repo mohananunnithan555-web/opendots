@@ -30,8 +30,17 @@ import {
   X,
   Sparkles,
   Image as ImageIcon,
+  Plus,
+  Loader2,
+  Search,
 } from 'lucide-react';
 import { ImageModal } from './ImageModal';
+import { ToolsMenu } from './ToolsMenu';
+import { SketchModal, type UploadedAttachment } from './SketchModal';
+import { LibraryModal } from './LibraryModal';
+import { BrowserTabsModal } from './BrowserTabsModal';
+import { GitHubConnectModal } from './GitHubConnectModal';
+import { OpenAiModal } from './OpenAiModal';
 import { getSpeechRecognition } from './speech';
 import { useDictation } from './useDictation';
 import {
@@ -116,6 +125,63 @@ export function Chat({
     aspectRatio?: '16:9' | '1:1' | '4:3' | '3:4' | '9:16';
   }>({});
   const [grokMode, setGrokMode] = useState<'normal' | 'think' | 'fun' | 'deepsearch' | 'de-hype'>('normal');
+  const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
+  const [sketchModalOpen, setSketchModalOpen] = useState(false);
+  const [libraryModalOpen, setLibraryModalOpen] = useState(false);
+  const [browserTabsModalOpen, setBrowserTabsModalOpen] = useState(false);
+  const [gitHubModalOpen, setGitHubModalOpen] = useState(false);
+  const [openAiModalOpen, setOpenAiModalOpen] = useState(false);
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [isWebSearchActive, setIsWebSearchActive] = useState(false);
+  const [isGitHubConnected, setIsGitHubConnected] = useState(false);
+  const [isOpenAiConfigured, setIsOpenAiConfigured] = useState(false);
+
+  const checkIntegrationsStatus = useCallback(async () => {
+    try {
+      if (typeof fetch === 'undefined') return;
+      const res = await fetch('/api/connectors');
+      if (!res.ok) return;
+      const connectors = (await res.json()) as any[];
+      if (Array.isArray(connectors)) {
+        const gh = connectors.find((c) => c.type === 'github');
+        setIsGitHubConnected(gh?.status === 'connected');
+        const oai = connectors.find((c) => c.type === 'openai');
+        setIsOpenAiConfigured(oai?.status === 'connected');
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    checkIntegrationsStatus();
+  }, [checkIntegrationsStatus]);
+
+  const handleUploadFile = async (file: File) => {
+    try {
+      setUploadingAttachment(true);
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/files/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Upload failed');
+      }
+
+      const data = await res.json();
+      if (data.file) {
+        setAttachments((prev) => [...prev, data.file]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'File upload failed');
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
 
   useEffect(() => {
     const handleOpenStudio = (e: Event) => {
@@ -388,7 +454,9 @@ export function Chat({
                   'POST',
                   { title },
                 );
-                location.hash = `/spaces/${page.spaceId}/pages/${page.id}`;
+                if (typeof window !== 'undefined' && window.location) {
+                  window.location.hash = `/spaces/${page.spaceId}/pages/${page.id}`;
+                }
               } catch (e) {
                 setError(
                   e instanceof Error
@@ -518,7 +586,29 @@ export function Chat({
               : grokMode === 'de-hype'
               ? '[GROK DE-HYPE MODE: Cut through marketing jargon and objectively balance tradeoffs and competing viewpoints.]\n'
               : '';
-          const fullDraft = `${source ? `From ${source}:\n\n` : ''}${modeInstruction}${draft}`;
+
+          const searchInstruction = isWebSearchActive
+            ? '[WEB SEARCH ENABLED: Inspect current real-time web sources and provide citations]\n'
+            : '';
+
+          let attachmentBlock = '';
+          if (attachments.length > 0) {
+            const list = attachments
+              .map((att) => {
+                let s = `- Attached ${att.type}: "${att.name}" (${att.previewUrl})`;
+                if (att.textSnippet) {
+                  s += `\n  Content Snippet:\n  \`\`\`\n  ${att.textSnippet}\n  \`\`\``;
+                }
+                return s;
+              })
+              .join('\n\n');
+            attachmentBlock = `[ATTACHED FILES:\n${list}\n]\n\n`;
+          }
+
+          const userText = draft.trim() || (attachments.length > 0 ? 'Please inspect and analyze the attached file(s).' : '');
+          const fullDraft = `${source ? `From ${source}:\n\n` : ''}${modeInstruction}${searchInstruction}${attachmentBlock}${userText}`;
+
+          setAttachments([]);
           void send(fullDraft);
         }}
       >
@@ -660,7 +750,180 @@ export function Chat({
           </div>
         )}
 
+        {/* Attachment Chips Preview Tray */}
+        {(attachments.length > 0 || uploadingAttachment) && (
+          <div
+            className="chat-attachments-tray"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 8,
+              overflowX: 'auto',
+              paddingBottom: 4,
+            }}
+          >
+            {attachments.map((att, idx) => {
+              const isImg = att.type === 'image' || att.type === 'sketch';
+              return (
+                <div
+                  key={att.id + idx}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '4px 8px',
+                    background: '#141925',
+                    border: '1px solid #252b38',
+                    borderRadius: 10,
+                    fontSize: '0.75rem',
+                    color: '#f8fafc',
+                    maxWidth: '220px',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+                    flexShrink: 0,
+                  }}
+                >
+                  {isImg ? (
+                    <img
+                      src={att.previewUrl}
+                      alt={att.name}
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 6,
+                        objectFit: 'cover',
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 6,
+                        background: '#1a2030',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#818cf8',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <FilePlus size={14} />
+                    </div>
+                  )}
+                  <div style={{ overflow: 'hidden', flex: 1 }}>
+                    <div
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontWeight: 500,
+                      }}
+                      title={att.name}
+                    >
+                      {att.name}
+                    </div>
+                    <div style={{ fontSize: '0.65rem', color: '#64748b' }}>
+                      {(att.size / 1024).toFixed(0)} KB
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#94a3b8',
+                      cursor: 'pointer',
+                      padding: 2,
+                      borderRadius: 4,
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                    title="Remove attachment"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              );
+            })}
+            {uploadingAttachment && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 10px',
+                  background: '#141925',
+                  border: '1px dashed #6366f1',
+                  borderRadius: 10,
+                  fontSize: '0.72rem',
+                  color: '#818cf8',
+                  flexShrink: 0,
+                }}
+              >
+                <Loader2 size={13} className="animate-spin" /> Uploading file...
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="chat-compose-row">
+          {/* Tools & Integrations (+) Button */}
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <button
+              type="button"
+              className={`icon-button tools-plus-button ${toolsMenuOpen ? 'active' : ''}`}
+              aria-label="Open tools & integrations menu"
+              title="Tools & integrations: Upload files, library, create image, browser tabs, web search, sketch, thinking mode, GitHub, OpenAI"
+              onClick={() => setToolsMenuOpen(!toolsMenuOpen)}
+              style={{
+                background: toolsMenuOpen ? '#6366f1' : undefined,
+                color: toolsMenuOpen ? '#ffffff' : undefined,
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Plus
+                size={19}
+                style={{
+                  transform: toolsMenuOpen ? 'rotate(45deg)' : 'none',
+                  transition: 'transform 0.15s ease',
+                }}
+              />
+            </button>
+            <ToolsMenu
+              open={toolsMenuOpen}
+              onClose={() => setToolsMenuOpen(false)}
+              onUploadFile={handleUploadFile}
+              onOpenLibrary={() => setLibraryModalOpen(true)}
+              onOpenImageStudio={() => {
+                setImageModalInitial({ prompt: draft });
+                setImageModalOpen(true);
+              }}
+              onOpenBrowserTabs={() => setBrowserTabsModalOpen(true)}
+              onToggleWebSearch={() => setIsWebSearchActive((v) => !v)}
+              isWebSearchActive={isWebSearchActive}
+              onToggleDeepResearch={() => {
+                setGrokMode((m) => (m === 'deepsearch' ? 'normal' : 'deepsearch'));
+              }}
+              isDeepResearchActive={grokMode === 'deepsearch'}
+              onOpenSketch={() => setSketchModalOpen(true)}
+              onToggleThinkingMode={() => {
+                setGrokMode((m) => (m === 'think' ? 'normal' : 'think'));
+              }}
+              isThinkingModeActive={grokMode === 'think'}
+              onOpenGitHub={() => setGitHubModalOpen(true)}
+              isGitHubConnected={isGitHubConnected}
+              onOpenOpenAI={() => setOpenAiModalOpen(true)}
+              isOpenAiConfigured={isOpenAiConfigured}
+              onOpenConnectorsHub={() => {
+                if (typeof window !== 'undefined' && window.location) {
+                  window.location.hash = '#integrations';
+                }
+              }}
+            />
+          </div>
+
           <button
             type="button"
             className="icon-button"
@@ -699,21 +962,15 @@ export function Chat({
           >
             {dictation.isListening ? <Square size={16} fill="currentColor" /> : <Mic size={19} />}
           </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Open AI Image Studio (1080p & 4K)"
-            title="Open AI Image Studio (generate images in 1080p Full HD or 4K with quality controls)"
-            onClick={() => {
-              setImageModalInitial({ prompt: draft });
-              setImageModalOpen(true);
-            }}
-          >
-            <ImageIcon size={19} />
-          </button>
           <textarea
             aria-label="Message your Dot"
-            placeholder={`Message ${dot.name}…`}
+            placeholder={
+              isWebSearchActive
+                ? `Search web & message ${dot.name}…`
+                : attachments.length > 0
+                ? `Ask ${dot.name} about attached file(s)…`
+                : `Message ${dot.name}…`
+            }
             rows={1}
             value={draft}
             maxLength={4000}
@@ -738,7 +995,7 @@ export function Chat({
             <button
               className="send-button"
               aria-label="Send message"
-              disabled={!draft.trim() || !loaded || !contextReady || paused}
+              disabled={(!draft.trim() && attachments.length === 0) || !loaded || !contextReady || paused}
             >
               <ArrowUp size={19} />
             </button>
@@ -757,6 +1014,34 @@ export function Chat({
         initialQuality={imageModalInitial.quality}
         initialAspectRatio={imageModalInitial.aspectRatio}
         onInsertToChat={(md) => void send(md)}
+      />
+      <SketchModal
+        open={sketchModalOpen}
+        onClose={() => setSketchModalOpen(false)}
+        onAttach={(att) => setAttachments((prev) => [...prev, att])}
+      />
+      <LibraryModal
+        open={libraryModalOpen}
+        onClose={() => setLibraryModalOpen(false)}
+        onSelect={(att) => setAttachments((prev) => [...prev, att])}
+      />
+      <BrowserTabsModal
+        open={browserTabsModalOpen}
+        onClose={() => setBrowserTabsModalOpen(false)}
+        onAddTabUrl={(url) => {
+          setSource(url);
+          setSourceOpen(true);
+        }}
+      />
+      <GitHubConnectModal
+        open={gitHubModalOpen}
+        onClose={() => setGitHubModalOpen(false)}
+        onStatusChange={checkIntegrationsStatus}
+      />
+      <OpenAiModal
+        open={openAiModalOpen}
+        onClose={() => setOpenAiModalOpen(false)}
+        onStatusChange={checkIntegrationsStatus}
       />
     </div>
   );
