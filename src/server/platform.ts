@@ -219,11 +219,13 @@ export class Platform {
       reqUrl.searchParams.set('agentId', thread.dotId);
       finalRequest = new Request(reqUrl.toString(), request);
     }
-    const match = reqUrl.pathname.match(/\/agent\/chat-([^/]+)(\/.*)?$/);
+    const match = reqUrl.pathname.match(/\/(?:agents|agent)\/chat-([^/]+)(\/.*)?$/);
     if (match) {
       const threadId = match[1];
       const thread = this.workspace.ensureThread(threadId, defaultDotId);
-      reqUrl.pathname = reqUrl.pathname.replace(`/agent/chat-${match[1]}`, `/agent/${thread.dotId}`);
+      const prefix = match[0].includes('/agents/') ? '/agents/' : '/agent/';
+      const suffix = match[2] || '';
+      reqUrl.pathname = reqUrl.pathname.replace(match[0], `${prefix}${thread.dotId}${suffix}`);
       finalRequest = new Request(reqUrl.toString(), request);
     }
     const response = await this.handler.fetch(finalRequest);

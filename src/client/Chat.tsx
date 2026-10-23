@@ -267,6 +267,7 @@ export function Chat({
   useEffect(() => {
     const subscription = copilotkit.subscribe({
       onError: ({ error, code }) => {
+        console.error('[Chat] CopilotKit subscription error:', code, error);
         if (
           code === CopilotKitCoreErrorCode.AGENT_RUN_ERROR_EVENT ||
           code === CopilotKitCoreErrorCode.AGENT_RUN_FAILED_EVENT ||
@@ -278,7 +279,10 @@ export function Chat({
       },
     });
     const events = agent.subscribe({
-      onRunErrorEvent: ({ event }) => setRunError(event.message),
+      onRunErrorEvent: ({ event }) => {
+        console.error('[Chat] Agent onRunErrorEvent:', event);
+        setRunError(event.message);
+      },
       onRunFinishedEvent: ({ outcome }) => {
         if (outcome === 'success') setRunError('');
       },
@@ -327,11 +331,20 @@ export function Chat({
         );
       onSaved();
     } catch (e) {
-      setRunError(
-        e instanceof Error
+      console.error('[Chat] Turn execution failed:', e);
+      setRunError((current) => {
+        if (
+          current &&
+          current.trim() &&
+          current !==
+            'The current turn returned no response. Check the runtime connection and retry.'
+        ) {
+          return current;
+        }
+        return e instanceof Error
           ? e.message
-          : 'The turn failed. Your conversation remains saved.',
-      );
+          : 'The turn failed. Your conversation remains saved.';
+      });
     } finally {
       setRunning(false);
     }

@@ -37,13 +37,26 @@ const workspace = new WorkspaceStore(
   process.env.OWNER_ID ?? 'opendots-owner',
 );
 void initCloudDatabase();
+const resolvedApiKey = process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY;
+const isGeminiKey = !!(
+  process.env.GEMINI_API_KEY ||
+  resolvedApiKey?.startsWith('AIza') ||
+  resolvedApiKey?.startsWith('AQ.')
+);
+const resolvedModel = process.env.OPENAI_MODEL || 'gemini-3.8-flash';
+const resolvedBaseUrl =
+  process.env.OPENAI_BASE_URL ||
+  (isGeminiKey || resolvedModel.includes('gemini')
+    ? 'https://generativelanguage.googleapis.com/v1beta/openai/'
+    : 'https://api.openai.com/v1');
+
 const config: PlatformConfig = {
   intelligenceKey: intelligenceApiKeyFromEnv(process.env),
   intelligenceApiUrl: process.env.INTELLIGENCE_API_URL || undefined,
   intelligenceWsUrl: intelligenceWsUrlFromEnv(process.env),
-  apiKey: process.env.OPENAI_API_KEY,
-  model: process.env.OPENAI_MODEL || 'gemini-3.8-flash',
-  baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+  apiKey: resolvedApiKey,
+  model: resolvedModel,
+  baseUrl: resolvedBaseUrl,
   agentRunTimeoutMs: agentRunTimeoutMsFromEnv(process.env),
   webSearchProvider: webSearchProvider(process.env.WEB_SEARCH_PROVIDER),
   parallelApiKey: process.env.PARALLEL_API_KEY,
@@ -111,7 +124,7 @@ app.use('*', async (c, next) => {
   c.header('Referrer-Policy', 'no-referrer');
   c.header(
     'Content-Security-Policy',
-    `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${wsOrigin}; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
+    `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; connect-src 'self' ${wsOrigin} wss://realtime.intelligence.copilotkit.ai https://*.copilotkit.ai wss://*.copilotkit.ai https://generativelanguage.googleapis.com https://accounts.google.com https://api.venice.ai https://*.onrender.com; media-src 'self' blob: data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
   );
   await next();
 });

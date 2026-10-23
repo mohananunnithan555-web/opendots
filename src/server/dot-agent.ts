@@ -92,6 +92,7 @@ export class DotAgent extends AbstractAgent {
         subscriber.complete();
       }, turnTimeLimitMs);
       const fail = (error: unknown) => {
+        console.error('[DotAgent] Startup failed:', error);
         if (subscriber.closed) return;
         if (!configurationFailure) observe({ type: EventType.RUN_ERROR });
         subscriber.next(
@@ -517,6 +518,7 @@ export class DotAgent extends AbstractAgent {
                 );
               },
               error: (error: unknown) => {
+                console.error('[DotAgent] Turn execution failed:', error);
                 observe({ type: EventType.RUN_ERROR });
                 if (this.channel) {
                   subscriber.next(channelError());
