@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "concurrently -k \"cross-env NODE_ENV=development tsx watch --env-file=.env src/server/index.ts\" \"vite\"",
-    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 vite build && node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc -p tsconfig.server.json",
+    "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node --env-file-if-exists=.env dist/server/server/index.js",
     "browser": "node --env-file-if-exists=.env --import tsx src/browser/index.ts",
     "browser:start": "node --env-file-if-exists=.env dist/server/browser/index.js",

@@ -249,7 +249,7 @@ export function App() {
         })
         .catch((e) => {
           if (!active) return;
-          if (e instanceof ApiError && e.status === 404) return;
+          if (e instanceof ApiError && (e.status === 404 || e.status === 403)) return;
           setNotices((current) =>
             applyCaptureResult(
               current,

@@ -406,11 +406,18 @@ export class WorkspaceStore {
   }
   conversations(ownerId?: string): Conversation[] {
     const targetOwner = ownerId ?? this.ownerId;
+    if (targetOwner === this.ownerId) {
+      return this.db
+        .prepare(
+          'SELECT * FROM thread_bindings ORDER BY createdAt DESC',
+        )
+        .all() as unknown as Conversation[];
+    }
     return this.db
       .prepare(
-        'SELECT * FROM thread_bindings WHERE ownerId=? ORDER BY createdAt DESC',
+        'SELECT * FROM thread_bindings WHERE ownerId=? OR ownerId=? ORDER BY createdAt DESC',
       )
-      .all(targetOwner) as unknown as Conversation[];
+      .all(targetOwner, this.ownerId) as unknown as Conversation[];
   }
   bindThread(id: string, dotId: string, title: string, ownerId?: string): Conversation {
     const dot = this.dot(dotId);
