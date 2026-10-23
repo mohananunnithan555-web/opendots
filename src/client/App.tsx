@@ -497,29 +497,33 @@ export function App() {
           </button>
         </div>
         <nav className="dots-nav" aria-label="Dots">
-          {workspace.dots.map((item) => (
-            <div className="dot-nav-row" key={item.id}>
-              <button
-                className={`dot-nav ${dot.id === item.id && view === 'chat' ? 'active' : ''}`}
-                aria-current={
-                  dot.id === item.id && view === 'chat' ? 'page' : undefined
-                }
-                onClick={() => chooseDot(item)}
-              >
-                <Mascot identity={item.id} name={item.name} small decorative />
-                <span>{item.name}</span>
-              </button>
-              <button
-                className="icon-button dot-settings"
-                aria-label={`Edit ${item.name} settings`}
-                onClick={() =>
-                  setDialog({ type: 'dot', dot: item, spaceId: item.spaceId })
-                }
-              >
-                <MoreHorizontal size={15} />
-              </button>
-            </div>
-          ))}
+          {workspace.dots.length === 0 ? (
+            <div className="sidebar-empty">No dots available. Click + to create one.</div>
+          ) : (
+            workspace.dots.map((item) => (
+              <div className="dot-nav-row" key={item.id}>
+                <button
+                  className={`dot-nav ${dot?.id === item.id && view === 'chat' ? 'active' : ''}`}
+                  aria-current={
+                    dot?.id === item.id && view === 'chat' ? 'page' : undefined
+                  }
+                  onClick={() => chooseDot(item)}
+                >
+                  <Mascot identity={item.id} name={item.name} small decorative />
+                  <span>{item.name}</span>
+                </button>
+                <button
+                  className="icon-button dot-settings"
+                  aria-label={`Edit ${item.name} settings`}
+                  onClick={() =>
+                    setDialog({ type: 'dot', dot: item, spaceId: item.spaceId })
+                  }
+                >
+                  <MoreHorizontal size={15} />
+                </button>
+              </div>
+            ))
+          )}
         </nav>
         <div className="spaces-heading nav-label">
           SPACES
@@ -542,7 +546,7 @@ export function App() {
             />
           ))}
         </nav>
-        {configured ? (
+        {configured && dot ? (
           <ThreadList
             dotId={dot.id}
             dots={workspace.dots}
